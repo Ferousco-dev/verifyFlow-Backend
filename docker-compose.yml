@@ -1,0 +1,39 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: migo
+      POSTGRES_PASSWORD: migo
+      POSTGRES_DB: migo
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U migo -d migo"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      APP_ENV: development
+      PORT: "8080"
+      DATABASE_URL: postgresql://migo:migo@db:5432/migo?sslmode=disable
+      # Set ACCESS_TOKEN_SECRET in your shell or a compose .env file:
+      #   export ACCESS_TOKEN_SECRET=$(openssl rand -hex 32)
+      ACCESS_TOKEN_SECRET: ${ACCESS_TOKEN_SECRET:?set ACCESS_TOKEN_SECRET (openssl rand -hex 32)}
+      ACCESS_TOKEN_TTL: 15m
+      REFRESH_TOKEN_TTL: 720h
+      FRONTEND_URL: http://localhost:3000,http://localhost:5173
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+    ports:
+      - "8080:8080"
+
+volumes:
+  pgdata:
