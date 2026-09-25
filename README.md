@@ -1,4 +1,5 @@
-# Migo backend — v0.4 (Authentication + Hardening + Account Security)
+# Migo backend 
+
 
 Go + PostgreSQL. Email/password auth, Argon2id, short-lived JWT access tokens,
 rotating refresh sessions with reuse detection, email verification, and account password changes.
