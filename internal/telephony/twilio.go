@@ -35,6 +35,12 @@ var _ InboundMessageParser = (*Twilio)(nil)
 var _ WebhookConfigurer = (*Twilio)(nil)
 
 func NewTwilio(accountSID, authToken string) (*Twilio, error) {
+	return NewTwilioWithBaseURL(accountSID, authToken, twilioAPIBaseURL, &http.Client{Timeout: 10 * time.Second})
+}
+
+// NewTwilioWithBaseURL is for pointing at a test double of the Twilio API
+// (e.g. httptest.NewServer) from other packages' tests.
+func NewTwilioWithBaseURL(accountSID, authToken, baseURL string, httpClient *http.Client) (*Twilio, error) {
 	accountSID = strings.TrimSpace(accountSID)
 	authToken = strings.TrimSpace(authToken)
 	if accountSID == "" || authToken == "" {
@@ -43,8 +49,8 @@ func NewTwilio(accountSID, authToken string) (*Twilio, error) {
 	return &Twilio{
 		accountSID: accountSID,
 		authToken:  authToken,
-		client:     &http.Client{Timeout: 10 * time.Second},
-		baseURL:    twilioAPIBaseURL,
+		client:     httpClient,
+		baseURL:    baseURL,
 		validator:  twilioclient.NewRequestValidator(authToken),
 	}, nil
 }

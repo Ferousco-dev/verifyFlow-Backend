@@ -9,7 +9,7 @@ import (
 )
 
 func TestAdminProviderConfigCreateListAndToggle(t *testing.T) {
-	h, pool, _ := newFullStack(t)
+	h, pool, _, _ := newFullStack(t, "", "")
 	adminID, adminToken := registerVerifiedUser(t, h, pool, "provider-admin@example.com")
 	if _, err := pool.Exec(context.Background(), `UPDATE users SET role = 'admin' WHERE id = $1::uuid`, adminID); err != nil {
 		t.Fatal(err)
@@ -69,7 +69,7 @@ func TestAdminProviderConfigCreateListAndToggle(t *testing.T) {
 }
 
 func TestAdminProviderConfigCreateRejectsInvalidFields(t *testing.T) {
-	h, pool, _ := newFullStack(t)
+	h, pool, _, _ := newFullStack(t, "", "")
 	adminID, adminToken := registerVerifiedUser(t, h, pool, "provider-admin-2@example.com")
 	if _, err := pool.Exec(context.Background(), `UPDATE users SET role = 'admin' WHERE id = $1::uuid`, adminID); err != nil {
 		t.Fatal(err)

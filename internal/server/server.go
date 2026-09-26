@@ -11,6 +11,7 @@ import (
 	apidocs "migo/docs"
 	"migo/internal/auth"
 	"migo/internal/httpx"
+	"migo/internal/payment"
 	"migo/internal/providerconfig"
 	"migo/internal/ratelimit"
 	"migo/internal/rental"
@@ -72,6 +73,7 @@ type Deps struct {
 	Tokens         *auth.TokenManager
 	AuthService    *auth.Service
 	Rental         *rental.Handler
+	Payment        *payment.Handler
 	ProviderConfig *providerconfig.Handler
 	Limiters       Limiters
 	AllowedOrigins []string
@@ -146,6 +148,17 @@ func New(d Deps) http.Handler {
 		mux.Handle("GET /api/v1/rental-plans", requireVerified(http.HandlerFunc(d.Rental.ListPlans)))
 		mux.Handle("POST /api/v1/rentals", requireVerified(http.HandlerFunc(d.Rental.Reserve)))
 		mux.Handle("GET /api/v1/orders/{id}", requireVerified(http.HandlerFunc(d.Rental.GetOrder)))
+
+		if d.Payment != nil {
+			mux.Handle("POST /api/v1/orders/{id}/payment", requireVerified(http.HandlerFunc(d.Payment.Initialize)))
+			mux.Handle("POST /api/v1/orders/{id}/payment/verify", requireVerified(http.HandlerFunc(d.Payment.Verify)))
+		}
+	}
+
+	if d.Payment != nil {
+		// Unauthenticated by design: trust comes from the Paystack signature
+		// checked inside the handler, not from a bearer token.
+		mux.Handle("POST /api/v1/webhooks/paystack", http.HandlerFunc(d.Payment.Webhook))
 	}
 
 	// Outermost first: logging sees everything; CORS wraps the router so

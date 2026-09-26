@@ -15,7 +15,9 @@ import (
 	"migo/internal/auth"
 	"migo/internal/config"
 	"migo/internal/database"
+	"migo/internal/fulfillment"
 	"migo/internal/mailer"
+	"migo/internal/payment"
 	"migo/internal/providerconfig"
 	"migo/internal/providercrypto"
 	"migo/internal/rental"
@@ -96,8 +98,11 @@ func run(log *slog.Logger) error {
 	rentalHandler := rental.NewHandler(rentalSvc)
 
 	// Provider credential encryption is optional until PROVIDER_CREDENTIAL_KEYS
-	// is set; without it, admins simply cannot create provider configs yet.
+	// is set; without it, admins simply cannot create provider configs, and
+	// payment processing (which needs a decrypted Paystack secret key) stays
+	// disabled too.
 	var providerConfigHandler *providerconfig.Handler
+	var paymentHandler *payment.Handler
 	if len(cfg.ProviderCredentialKeys) > 0 {
 		keyRing, err := providercrypto.NewKeyRing(cfg.ProviderCredentialKeys, cfg.ProviderCredentialKeyVersion)
 		if err != nil {
@@ -108,8 +113,26 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		providerConfigHandler = providerconfig.NewHandler(providerConfigSvc)
+
+		fulfillmentSvc, err := fulfillment.NewService(rentalSvc, fulfillment.NewProviderConfigResolver(providerConfigSvc))
+		if err != nil {
+			return err
+		}
+
+		paymentSvc, err := payment.NewService(
+			payment.NewRepository(pool),
+			payment.NewRentalOrders(rentalSvc),
+			payment.NewAuthUserEmails(svc),
+			payment.NewProviderConfigResolver(providerConfigSvc),
+			fulfillmentSvc,
+			cfg.PaystackCallbackURL,
+		)
+		if err != nil {
+			return err
+		}
+		paymentHandler = payment.NewHandler(paymentSvc)
 	} else {
-		log.Warn("PROVIDER_CREDENTIAL_KEYS not set: provider config management is disabled")
+		log.Warn("PROVIDER_CREDENTIAL_KEYS not set: provider config management and payment processing are disabled")
 	}
 
 	authHandler := auth.NewHandler(svc, log)
@@ -131,7 +154,7 @@ func run(log *slog.Logger) error {
 		Addr: ":" + cfg.Port,
 		Handler: server.New(server.Deps{
 			Log: log, DB: pool, Auth: authHandler, Tokens: tokens, AuthService: svc,
-			Rental: rentalHandler, ProviderConfig: providerConfigHandler,
+			Rental: rentalHandler, Payment: paymentHandler, ProviderConfig: providerConfigHandler,
 			Limiters: limiters, AllowedOrigins: cfg.AllowedOrigins, TrustedProxies: cfg.TrustedProxies,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

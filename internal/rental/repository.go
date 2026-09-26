@@ -196,6 +196,10 @@ func (r *Repository) GetOrder(ctx context.Context, userID, orderID string) (Orde
 	return scanOrder(r.pool.QueryRow(ctx, orderSelect+`WHERE o.user_id = $1::uuid AND o.id = $2::uuid`, userID, orderID))
 }
 
+func (r *Repository) GetOrderByID(ctx context.Context, orderID string) (Order, error) {
+	return scanOrder(r.pool.QueryRow(ctx, orderSelect+`WHERE o.id = $1::uuid`, orderID))
+}
+
 func (r *Repository) GetReservation(ctx context.Context, userID, orderID, rentalID string) (Reservation, error) {
 	order, err := scanOrder(r.pool.QueryRow(ctx,
 		orderSelect+`WHERE o.user_id = $1::uuid AND o.id = $2::uuid AND r.id = $3::uuid`, userID, orderID, rentalID))
@@ -203,6 +207,116 @@ func (r *Repository) GetReservation(ctx context.Context, userID, orderID, rental
 		return Reservation{}, err
 	}
 	return Reservation{Order: order}, nil
+}
+
+func (r *Repository) GetFulfillmentSnapshot(ctx context.Context, orderID string) (FulfillmentSnapshot, error) {
+	var s FulfillmentSnapshot
+	err := r.pool.QueryRow(ctx,
+		`SELECT o.id::text, r.id::text, pn.id::text, pn.provider_config_id::text, pn.phone_number, pn.number_type,
+		        pn.sms_enabled, pn.mms_enabled, pn.voice_enabled, o.duration_seconds_snapshot, r.activated_at
+		   FROM orders o
+		   JOIN rentals r ON r.order_id = o.id
+		   JOIN provider_numbers pn ON pn.id = r.provider_number_id
+		  WHERE o.id = $1::uuid`, orderID,
+	).Scan(&s.OrderID, &s.RentalID, &s.ProviderNumberID, &s.ProviderConfigID, &s.PhoneNumber, &s.NumberType,
+		&s.SMSEnabled, &s.MMSEnabled, &s.VoiceEnabled, &s.DurationSeconds, &s.ActivatedAt)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return FulfillmentSnapshot{}, ErrNotFound
+	}
+	return s, err
+}
+
+func (r *Repository) SwapToReplacementNumber(ctx context.Context, orderID, failedNumberID, numberType string, sms, mms, voice bool, now time.Time) (string, bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return "", false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var rentalID string
+	if err := tx.QueryRow(ctx,
+		`SELECT id::text FROM rentals WHERE order_id = $1::uuid FOR UPDATE`, orderID,
+	).Scan(&rentalID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", false, ErrNotFound
+		}
+		return "", false, err
+	}
+
+	var replacementID string
+	err = tx.QueryRow(ctx,
+		`SELECT id::text FROM provider_numbers
+		  WHERE status = 'AVAILABLE' AND number_type = $1 AND sms_enabled = $2 AND mms_enabled = $3 AND voice_enabled = $4
+		    AND id <> $5::uuid
+		  ORDER BY id
+		  FOR UPDATE SKIP LOCKED
+		  LIMIT 1`,
+		numberType, sms, mms, voice, failedNumberID,
+	).Scan(&replacementID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		if _, err := tx.Exec(ctx,
+			`UPDATE orders SET order_status = 'PENDING_FULFILLMENT' WHERE id = $1::uuid AND order_status = 'PENDING'`, orderID,
+		); err != nil {
+			return "", false, err
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return "", false, err
+		}
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+
+	if _, err := tx.Exec(ctx,
+		`UPDATE provider_numbers SET status = 'AVAILABLE', updated_at = $2 WHERE id = $1::uuid`, failedNumberID, now,
+	); err != nil {
+		return "", false, err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE provider_numbers SET status = 'RESERVED', updated_at = $2 WHERE id = $1::uuid`, replacementID, now,
+	); err != nil {
+		return "", false, err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE rentals SET provider_number_id = $2 WHERE id = $1::uuid`, rentalID, replacementID,
+	); err != nil {
+		return "", false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return "", false, err
+	}
+	return replacementID, true, nil
+}
+
+func (r *Repository) ActivateRental(ctx context.Context, orderID, providerNumberID, providerReference string, expiresAt, now time.Time) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	tag, err := tx.Exec(ctx,
+		`UPDATE rentals SET activated_at = $2, expires_at = $3
+		  WHERE order_id = $1::uuid AND activated_at IS NULL`, orderID, now, expiresAt,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrAlreadyActivated
+	}
+	tag, err = tx.Exec(ctx,
+		`UPDATE provider_numbers SET status = 'ACTIVE', provider_reference = $2, updated_at = $3
+		  WHERE id = $1::uuid AND status = 'RESERVED'`, providerNumberID, providerReference, now,
+	)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNumberUnavailable
+	}
+	return tx.Commit(ctx)
 }
 
 func (r *Repository) ExpireReservation(ctx context.Context, rentalID string, now time.Time) (bool, error) {

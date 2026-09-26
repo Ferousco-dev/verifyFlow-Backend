@@ -17,6 +17,7 @@ var (
 	ErrNotFound              = errors.New("rental: order or rental not found")
 	ErrReservationNotExpired = errors.New("rental: reservation is not expired")
 	ErrNotReservation        = errors.New("rental: rental is not an unpaid reservation")
+	ErrAlreadyActivated      = errors.New("rental: rental is already activated")
 )
 
 type Order struct {
@@ -91,12 +92,33 @@ const (
 	maxSearchLimit     = 100
 )
 
+// FulfillmentSnapshot is everything provisioning needs to know about an
+// order's currently-assigned number, without exposing the rental package's
+// storage details.
+type FulfillmentSnapshot struct {
+	OrderID          string
+	RentalID         string
+	ProviderNumberID string
+	ProviderConfigID string
+	PhoneNumber      string
+	NumberType       string
+	SMSEnabled       bool
+	MMSEnabled       bool
+	VoiceEnabled     bool
+	DurationSeconds  int32
+	ActivatedAt      *time.Time
+}
+
 type Store interface {
 	SearchNumbers(context.Context, NumberFilter) (NumbersPage, error)
 	ListPlans(context.Context) ([]Plan, error)
 	Reserve(context.Context, ReserveInput) (Reservation, error)
 	GetOrder(context.Context, string, string) (Order, error)
+	GetOrderByID(context.Context, string) (Order, error)
 	ExpireReservation(context.Context, string, time.Time) (bool, error)
+	GetFulfillmentSnapshot(context.Context, string) (FulfillmentSnapshot, error)
+	SwapToReplacementNumber(ctx context.Context, orderID, failedNumberID, numberType string, sms, mms, voice bool, now time.Time) (newNumberID string, found bool, err error)
+	ActivateRental(ctx context.Context, orderID, providerNumberID, providerReference string, expiresAt, now time.Time) error
 }
 
 type Service struct {
@@ -154,9 +176,55 @@ func (s *Service) GetOrder(ctx context.Context, authenticatedUserID, orderID str
 	return s.store.GetOrder(ctx, authenticatedUserID, orderID)
 }
 
+// GetOrderByID looks up an order without checking ownership. It exists for
+// trusted internal callers only (e.g. reconciling a payment webhook, which
+// has no authenticated user context) and must never be exposed directly
+// over HTTP.
+func (s *Service) GetOrderByID(ctx context.Context, orderID string) (Order, error) {
+	if strings.TrimSpace(orderID) == "" {
+		return Order{}, ErrInvalidRequest
+	}
+	return s.store.GetOrderByID(ctx, orderID)
+}
+
 func (s *Service) ExpireReservation(ctx context.Context, rentalID string) (bool, error) {
 	if strings.TrimSpace(rentalID) == "" {
 		return false, ErrInvalidRequest
 	}
 	return s.store.ExpireReservation(ctx, rentalID, s.now().UTC())
+}
+
+// GetFulfillmentSnapshot is for trusted internal callers only (provisioning
+// after payment); it is never exposed directly over HTTP.
+func (s *Service) GetFulfillmentSnapshot(ctx context.Context, orderID string) (FulfillmentSnapshot, error) {
+	if strings.TrimSpace(orderID) == "" {
+		return FulfillmentSnapshot{}, ErrInvalidRequest
+	}
+	return s.store.GetFulfillmentSnapshot(ctx, orderID)
+}
+
+// SwapToReplacementNumber is called when failedNumberID could not be
+// provisioned. It looks for another AVAILABLE number with the same type and
+// capabilities, atomically releasing failedNumberID back to AVAILABLE and
+// reserving the replacement in its place. If none is available, the order
+// is moved to PENDING_FULFILLMENT and found is false; failedNumberID is left
+// untouched (RESERVED) for operator attention.
+func (s *Service) SwapToReplacementNumber(ctx context.Context, orderID, failedNumberID, numberType string, sms, mms, voice bool) (string, bool, error) {
+	if strings.TrimSpace(orderID) == "" || strings.TrimSpace(failedNumberID) == "" {
+		return "", false, ErrInvalidRequest
+	}
+	return s.store.SwapToReplacementNumber(ctx, orderID, failedNumberID, numberType, sms, mms, voice, s.now().UTC())
+}
+
+// ActivateRental marks providerNumberID ACTIVE and the order's rental
+// activated, recording providerReference (the telephony provider's resource
+// id for that number) and computing the rental's own expiry from now plus
+// the order's plan duration.
+func (s *Service) ActivateRental(ctx context.Context, orderID, providerNumberID, providerReference string, durationSeconds int32) error {
+	if strings.TrimSpace(orderID) == "" || strings.TrimSpace(providerNumberID) == "" || strings.TrimSpace(providerReference) == "" {
+		return ErrInvalidRequest
+	}
+	now := s.now().UTC()
+	expiresAt := now.Add(time.Duration(durationSeconds) * time.Second)
+	return s.store.ActivateRental(ctx, orderID, providerNumberID, providerReference, expiresAt, now)
 }

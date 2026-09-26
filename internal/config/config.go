@@ -52,6 +52,11 @@ type Config struct {
 	// drop the old entry once nothing references it anymore.
 	ProviderCredentialKeys       map[string][]byte
 	ProviderCredentialKeyVersion string
+
+	// PaystackCallbackURL is the frontend page Paystack redirects the payer
+	// to after checkout. Optional: when unset, Paystack falls back to the
+	// callback URL configured in its own dashboard.
+	PaystackCallbackURL string
 }
 
 const minSecretLen = 32
@@ -177,6 +182,12 @@ func Load(getenv func(string) string) (Config, error) {
 		errs = append(errs, errors.New("EMAIL_VERIFICATION_URL (or FRONTEND_URL) is required so verification emails can link to your frontend"))
 	} else if cfg.EmailVerificationURL, err = parseFrontendURL(verifyURL, cfg.AppEnv, "EMAIL_VERIFICATION_URL"); err != nil {
 		errs = append(errs, err)
+	}
+
+	if callbackURL := get("PAYSTACK_CALLBACK_URL", ""); callbackURL != "" {
+		if cfg.PaystackCallbackURL, err = parseFrontendURL(callbackURL, cfg.AppEnv, "PAYSTACK_CALLBACK_URL"); err != nil {
+			errs = append(errs, err)
+		}
 	}
 
 	cfg.ProviderCredentialKeys, cfg.ProviderCredentialKeyVersion, err = parseProviderCredentialKeys(

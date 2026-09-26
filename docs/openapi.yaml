@@ -1,17 +1,21 @@
 openapi: 3.0.3
 info:
   title: Verifyflow API
-  version: 0.4.0
+  version: 0.5.0
   description: |
-    Public HTTP contract for the currently registered health, authentication, and account routes.
-    All request bodies are JSON. Responses include an `X-Request-ID` header. Access tokens are
-    short-lived JWTs; refresh tokens are opaque, single-use tokens that rotate on refresh.
+    Public HTTP contract for the currently registered health, authentication, account, rental,
+    and admin routes. All request bodies are JSON. Responses include an `X-Request-ID` header.
+    Access tokens are short-lived JWTs; refresh tokens are opaque, single-use tokens that rotate
+    on refresh.
+
+    Rental routes require a verified email address in addition to a valid access token. Admin
+    routes require the signed-in user's role to be `admin`; every account starts as `user`.
 
     The backend also contains internal foundations for provider-neutral telephony, a Twilio
     adapter (number search/provision/release, webhook configuration, outbound SMS, and signed
-    inbound SMS normalization), and PostgreSQL rental, order, payment, and webhook-event tables.
-    These capabilities are not yet exposed as public HTTP endpoints and therefore do not appear
-    in this OpenAPI contract.
+    inbound SMS normalization), and payment integration. Number provisioning after payment,
+    inbound SMS persistence, and the reservation-expiry/quarantine worker are not yet exposed as
+    public HTTP endpoints and therefore do not appear in this OpenAPI contract.
 servers:
   - url: /
     description: Same origin as this documentation page
@@ -19,6 +23,8 @@ tags:
   - name: Health
   - name: Authentication
   - name: Account
+  - name: Rentals
+  - name: Admin
 paths:
   /health:
     get:
@@ -422,12 +428,464 @@ paths:
         '504':
           $ref: '#/components/responses/Timeout'
 
+  /api/v1/numbers:
+    get:
+      tags: [Rentals]
+      summary: Search available numbers
+      description: Lists provider numbers currently AVAILABLE for rental, optionally filtered by type and capability.
+      operationId: searchNumbers
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [Local, TollFree, Mobile]
+        - name: sms
+          in: query
+          description: When true, only return numbers with SMS capability.
+          schema:
+            type: boolean
+        - name: mms
+          in: query
+          description: When true, only return numbers with MMS capability.
+          schema:
+            type: boolean
+        - name: voice
+          in: query
+          description: When true, only return numbers with voice capability.
+          schema:
+            type: boolean
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: cursor
+          in: query
+          description: Opaque pagination cursor from a previous page's next_cursor.
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Page of available numbers.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NumbersPage'
+        '400':
+          description: Invalid type or limit.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: invalid_request
+                  message: Request is missing or has invalid fields.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EmailNotVerified'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '504':
+          $ref: '#/components/responses/Timeout'
+
+  /api/v1/rental-plans:
+    get:
+      tags: [Rentals]
+      summary: List active rental plans
+      operationId: listRentalPlans
+      security:
+        - BearerAuth: []
+      responses:
+        '200':
+          description: Active rental plans.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [plans]
+                properties:
+                  plans:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Plan'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EmailNotVerified'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '504':
+          $ref: '#/components/responses/Timeout'
+
+  /api/v1/rentals:
+    post:
+      tags: [Rentals]
+      summary: Reserve a number (checkout)
+      description: |
+        Reserves a provider number under a rental plan and creates a server-priced PENDING
+        order. Reusing the same Idempotency-Key with the same request returns the original
+        order instead of creating a new one; reusing it with a different number or plan is a
+        conflict. The reservation expires after a server-configured TTL if never paid.
+      operationId: reserveNumber
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema:
+            type: string
+            maxLength: 200
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReserveRequest'
+      responses:
+        '201':
+          description: Reservation and PENDING order created (or the original order, if this Idempotency-Key was already used).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [order]
+                properties:
+                  order:
+                    $ref: '#/components/schemas/Order'
+        '400':
+          description: Invalid JSON, missing fields, or missing Idempotency-Key header.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidJson:
+                  $ref: '#/components/examples/InvalidJSON'
+                missingIdempotencyKey:
+                  value:
+                    error:
+                      code: missing_idempotency_key
+                      message: Idempotency-Key header is required.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EmailNotVerified'
+        '404':
+          description: The requested number was not found.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: number_not_found
+                  message: The requested number was not found.
+        '409':
+          description: Number/plan is no longer available, or this Idempotency-Key was already used with a different request.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                numberUnavailable:
+                  value:
+                    error:
+                      code: number_unavailable
+                      message: The requested number is no longer available.
+                planUnavailable:
+                  value:
+                    error:
+                      code: plan_unavailable
+                      message: The requested rental plan is unavailable.
+                idempotencyConflict:
+                  value:
+                    error:
+                      code: idempotency_conflict
+                      message: This idempotency key was already used with a different request.
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '504':
+          $ref: '#/components/responses/Timeout'
+
+  /api/v1/orders/{id}:
+    get:
+      tags: [Rentals]
+      summary: Get an order owned by the signed-in user
+      operationId: getOrder
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PathID'
+      responses:
+        '200':
+          description: The order.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [order]
+                properties:
+                  order:
+                    $ref: '#/components/schemas/Order'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/EmailNotVerified'
+        '404':
+          description: No such order, or it belongs to another user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: not_found
+                  message: The requested order was not found.
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '504':
+          $ref: '#/components/responses/Timeout'
+
+  /api/v1/admin/users/{id}/role:
+    patch:
+      tags: [Admin]
+      summary: Change another user's role
+      description: |
+        Admin-only. Refuses to demote the last remaining admin (returns 409 last_admin), so an
+        admin can never lock every admin out of the system.
+      operationId: setUserRole
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PathID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetRoleRequest'
+      responses:
+        '200':
+          description: Role updated (or unchanged, if it already matched).
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MeResponse'
+        '400':
+          description: Invalid JSON or unknown role.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidJson:
+                  $ref: '#/components/examples/InvalidJSON'
+                invalidRole:
+                  value:
+                    error:
+                      code: invalid_role
+                      message: 'role must be one of: user, admin.'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such user.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: user_not_found
+                  message: User not found.
+        '409':
+          description: The target is the last remaining admin.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: last_admin
+                  message: Cannot remove the last remaining admin.
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '504':
+          $ref: '#/components/responses/Timeout'
+
+  /api/v1/admin/provider-configs:
+    get:
+      tags: [Admin]
+      summary: List provider configs
+      description: Admin-only. Never returns credential plaintext or ciphertext, only metadata.
+      operationId: listProviderConfigs
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: kind
+          in: query
+          schema:
+            type: string
+            enum: [telephony, payment]
+      responses:
+        '200':
+          description: Provider config metadata.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [provider_configs]
+                properties:
+                  provider_configs:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/ProviderConfig'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '504':
+          $ref: '#/components/responses/Timeout'
+    post:
+      tags: [Admin]
+      summary: Create a provider config
+      description: |
+        Admin-only. `credentials` is an opaque JSON object (e.g. `{"account_sid": "...",
+        "auth_token": "..."}` for Twilio) that is encrypted at rest with the server's current
+        provider-credential key; it is never stored or returned as plaintext.
+      operationId: createProviderConfig
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderConfigCreateRequest'
+      responses:
+        '201':
+          description: Provider config created.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [provider_config]
+                properties:
+                  provider_config:
+                    $ref: '#/components/schemas/ProviderConfig'
+        '400':
+          description: Invalid JSON, invalid kind/key/name, or missing credentials.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidJson:
+                  $ref: '#/components/examples/InvalidJSON'
+                invalidRequest:
+                  value:
+                    error:
+                      code: invalid_request
+                      message: Request is missing or has invalid fields.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          description: A provider config with this kind, key, and name already exists.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: duplicate_config
+                  message: A provider config with this kind, key and name already exists.
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '504':
+          $ref: '#/components/responses/Timeout'
+
+  /api/v1/admin/provider-configs/{id}:
+    patch:
+      tags: [Admin]
+      summary: Enable or disable a provider config
+      operationId: setProviderConfigEnabled
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/PathID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProviderConfigEnabledRequest'
+      responses:
+        '200':
+          description: Updated provider config.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [provider_config]
+                properties:
+                  provider_config:
+                    $ref: '#/components/schemas/ProviderConfig'
+        '400':
+          $ref: '#/components/responses/InvalidJSON'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          description: No such provider config.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: not_found
+                  message: The requested provider config was not found.
+        '413':
+          $ref: '#/components/responses/RequestTooLarge'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        '504':
+          $ref: '#/components/responses/Timeout'
+
 components:
   securitySchemes:
     BearerAuth:
       type: http
       scheme: bearer
       bearerFormat: JWT
+  parameters:
+    PathID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
   schemas:
     Health:
       type: object
@@ -527,7 +985,7 @@ components:
           description: Must differ from the current password.
     User:
       type: object
-      required: [id, full_name, username, email, email_verified, created_at]
+      required: [id, full_name, username, email, email_verified, role, created_at]
       properties:
         id:
           type: string
@@ -541,6 +999,9 @@ components:
           format: email
         email_verified:
           type: boolean
+        role:
+          type: string
+          enum: [user, admin]
         created_at:
           type: string
           format: date-time
@@ -581,6 +1042,185 @@ components:
       properties:
         message:
           type: string
+    SetRoleRequest:
+      type: object
+      required: [role]
+      additionalProperties: false
+      properties:
+        role:
+          type: string
+          enum: [user, admin]
+    NumberSummary:
+      type: object
+      required: [id, phone_number, number_type, sms_enabled, mms_enabled, voice_enabled]
+      properties:
+        id:
+          type: string
+          format: uuid
+        phone_number:
+          type: string
+          example: '+14155550001'
+        number_type:
+          type: string
+          enum: [Local, TollFree, Mobile]
+        sms_enabled:
+          type: boolean
+        mms_enabled:
+          type: boolean
+        voice_enabled:
+          type: boolean
+    NumbersPage:
+      type: object
+      required: [numbers]
+      properties:
+        numbers:
+          type: array
+          items:
+            $ref: '#/components/schemas/NumberSummary'
+        next_cursor:
+          type: string
+          description: Opaque cursor for the next page; empty when there are no more results.
+    Plan:
+      type: object
+      required: [id, code, name, duration_seconds, price_minor_units, currency]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+          example: one-hour
+        name:
+          type: string
+          example: One hour
+        duration_seconds:
+          type: integer
+          example: 3600
+        price_minor_units:
+          type: integer
+          format: int64
+          description: Price in the currency's smallest unit (e.g. cents).
+          example: 1299
+        currency:
+          type: string
+          example: USD
+    ReserveRequest:
+      type: object
+      required: [provider_number_id, rental_plan_id]
+      additionalProperties: false
+      properties:
+        provider_number_id:
+          type: string
+          format: uuid
+        rental_plan_id:
+          type: string
+          format: uuid
+    Order:
+      type: object
+      required:
+        - id
+        - rental_id
+        - provider_number_id
+        - rental_plan_id
+        - status
+        - plan_code
+        - plan_name
+        - duration_seconds
+        - price_minor_units
+        - currency
+        - reservation_expires_at
+        - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        rental_id:
+          type: string
+          format: uuid
+        provider_number_id:
+          type: string
+          format: uuid
+        rental_plan_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [PENDING, EXPIRED]
+        plan_code:
+          type: string
+        plan_name:
+          type: string
+        duration_seconds:
+          type: integer
+        price_minor_units:
+          type: integer
+          format: int64
+          description: Server-priced snapshot at reservation time; unaffected by later plan-price changes.
+        currency:
+          type: string
+        reservation_expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    ProviderConfig:
+      type: object
+      required: [id, kind, key, name, is_enabled, credential_key_version, created_at, updated_at]
+      description: Metadata only. Credential plaintext and ciphertext are never returned.
+      properties:
+        id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum: [telephony, payment]
+        key:
+          type: string
+          example: twilio
+        name:
+          type: string
+          example: primary
+        is_enabled:
+          type: boolean
+        credential_key_version:
+          type: string
+          description: Which server-side encryption key version protects this config's credentials.
+          example: v1
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ProviderConfigCreateRequest:
+      type: object
+      required: [kind, key, name, credentials]
+      additionalProperties: false
+      properties:
+        kind:
+          type: string
+          enum: [telephony, payment]
+        key:
+          type: string
+          pattern: '^[a-z][a-z0-9_-]{0,63}$'
+          example: twilio
+        name:
+          type: string
+          example: primary
+        credentials:
+          type: object
+          description: Opaque provider-specific credential fields. Encrypted at rest; never echoed back.
+          example:
+            account_sid: AC123...
+            auth_token: '********'
+    ProviderConfigEnabledRequest:
+      type: object
+      required: [is_enabled]
+      additionalProperties: false
+      properties:
+        is_enabled:
+          type: boolean
     ErrorResponse:
       type: object
       required: [error]
@@ -666,6 +1306,26 @@ components:
             error:
               code: unauthorized
               message: Authentication is required.
+    EmailNotVerified:
+      description: The signed-in user's email address is not verified.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: email_not_verified
+              message: Please verify your email address to use this feature.
+    Forbidden:
+      description: The signed-in user does not have the admin role required for this route.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+          example:
+            error:
+              code: forbidden
+              message: You do not have permission to perform this action.
     InternalError:
       description: Unexpected server error. Details are not exposed.
       content:

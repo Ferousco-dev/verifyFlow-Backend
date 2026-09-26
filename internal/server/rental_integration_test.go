@@ -14,7 +14,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"migo/internal/auth"
+	"migo/internal/fulfillment"
 	"migo/internal/mailer"
+	"migo/internal/payment"
 	"migo/internal/providerconfig"
 	"migo/internal/providercrypto"
 	"migo/internal/rental"
@@ -24,11 +26,14 @@ import (
 
 func newRentalStack(t *testing.T) (http.Handler, *pgxpool.Pool) {
 	t.Helper()
-	handler, pool, _ := newFullStack(t)
+	handler, pool, _, _ := newFullStack(t, "", "")
 	return handler, pool
 }
 
-func newFullStack(t *testing.T) (http.Handler, *pgxpool.Pool, *providerconfig.Handler) {
+// newFullStack builds the full router. paystackBaseURL and twilioBaseURL,
+// when non-empty, point the payment and fulfillment resolvers at test
+// doubles instead of the real production APIs.
+func newFullStack(t *testing.T, paystackBaseURL, twilioBaseURL string) (http.Handler, *pgxpool.Pool, *providerconfig.Handler, *providerconfig.Service) {
 	t.Helper()
 	pool := dbtest.NewMigrated(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -58,12 +63,32 @@ func newFullStack(t *testing.T) (http.Handler, *pgxpool.Pool, *providerconfig.Ha
 	}
 	providerConfigHandler := providerconfig.NewHandler(providerConfigSvc)
 
+	resolver := payment.NewProviderConfigResolver(providerConfigSvc)
+	if paystackBaseURL != "" {
+		resolver.SetBaseURL(paystackBaseURL, http.DefaultClient)
+	}
+	telephonyResolver := fulfillment.NewProviderConfigResolver(providerConfigSvc)
+	if twilioBaseURL != "" {
+		telephonyResolver.SetBaseURL(twilioBaseURL, http.DefaultClient)
+	}
+	fulfillmentSvc, err := fulfillment.NewService(rentalSvc, telephonyResolver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paymentSvc, err := payment.NewService(
+		payment.NewRepository(pool), payment.NewRentalOrders(rentalSvc), payment.NewAuthUserEmails(svc), resolver, fulfillmentSvc, "",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paymentHandler := payment.NewHandler(paymentSvc)
+
 	handler := New(Deps{
 		Log: log, DB: pool, Auth: h, Tokens: tokens, AuthService: svc,
-		Rental: rentalHandler, ProviderConfig: providerConfigHandler,
+		Rental: rentalHandler, Payment: paymentHandler, ProviderConfig: providerConfigHandler,
 		Limiters: DefaultLimiters(), AllowedOrigins: []string{allowedOrigin},
 	})
-	return handler, pool, providerConfigHandler
+	return handler, pool, providerConfigHandler, providerConfigSvc
 }
 
 var _ mailer.Sender = &sink{}
@@ -94,14 +119,22 @@ func registerVerifiedUser(t *testing.T, h http.Handler, pool *pgxpool.Pool, emai
 
 func seedRentalPlanAndNumber(t *testing.T, pool *pgxpool.Pool) (planID, numberID string) {
 	t.Helper()
-	ctx := context.Background()
 	var configID string
-	if err := pool.QueryRow(ctx,
+	if err := pool.QueryRow(context.Background(),
 		`INSERT INTO provider_configs (provider_kind, provider_key, config_name, credentials_ciphertext, credential_key_version)
 		 VALUES ('telephony', 'twilio', 'primary', decode('010203', 'hex'), 'test-v1') RETURNING id::text`,
 	).Scan(&configID); err != nil {
 		t.Fatal(err)
 	}
+	return seedRentalPlanAndNumberWithConfig(t, pool, configID)
+}
+
+// seedRentalPlanAndNumberWithConfig seeds a plan and an available number
+// backed by an existing provider_configs row (e.g. one created through
+// providerconfig.Service, so its credentials are actually decryptable).
+func seedRentalPlanAndNumberWithConfig(t *testing.T, pool *pgxpool.Pool, configID string) (planID, numberID string) {
+	t.Helper()
+	ctx := context.Background()
 	if err := pool.QueryRow(ctx,
 		`INSERT INTO rental_plans (plan_code, name, duration_seconds, price_minor_units, currency)
 		 VALUES ('one-hour', 'One hour', 3600, 1299, 'USD') RETURNING id::text`,

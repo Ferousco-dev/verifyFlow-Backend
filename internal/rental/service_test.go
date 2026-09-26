@@ -19,6 +19,25 @@ type fakeStore struct {
 	searchErr    error
 	plans        []Plan
 	plansErr     error
+
+	snapshot    FulfillmentSnapshot
+	snapshotErr error
+	swapNewID   string
+	swapFound   bool
+	swapErr     error
+	activateErr error
+}
+
+func (f *fakeStore) GetFulfillmentSnapshot(context.Context, string) (FulfillmentSnapshot, error) {
+	return f.snapshot, f.snapshotErr
+}
+
+func (f *fakeStore) SwapToReplacementNumber(context.Context, string, string, string, bool, bool, bool, time.Time) (string, bool, error) {
+	return f.swapNewID, f.swapFound, f.swapErr
+}
+
+func (f *fakeStore) ActivateRental(context.Context, string, string, string, time.Time, time.Time) error {
+	return f.activateErr
 }
 
 func (f *fakeStore) SearchNumbers(context.Context, NumberFilter) (NumbersPage, error) {
@@ -35,6 +54,10 @@ func (f *fakeStore) Reserve(_ context.Context, input ReserveInput) (Reservation,
 }
 
 func (f *fakeStore) GetOrder(context.Context, string, string) (Order, error) {
+	return f.order, f.getErr
+}
+
+func (f *fakeStore) GetOrderByID(context.Context, string) (Order, error) {
 	return f.order, f.getErr
 }
 
