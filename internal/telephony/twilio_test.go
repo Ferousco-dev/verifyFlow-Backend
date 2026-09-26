@@ -164,6 +164,40 @@ func TestTwilioProvisionReleaseAndSendMessage(t *testing.T) {
 	}
 }
 
+func TestTwilioConfiguresAndClearsNumberWebhooks(t *testing.T) {
+	requests := 0
+	provider := newTestTwilio(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.Method != http.MethodPost || r.URL.Path != "/2010-04-01/Accounts/AC-test/IncomingPhoneNumbers/PN-provider-ref.json" {
+			t.Errorf("request = %s %s", r.Method, r.URL.String())
+		}
+		if err := r.ParseForm(); err != nil {
+			t.Errorf("parse webhook form: %v", err)
+		}
+		if requests == 1 {
+			if r.Form.Get("SmsUrl") != "https://api.example.com/inbound" || r.Form.Get("StatusCallback") != "https://api.example.com/status" {
+				t.Errorf("webhook form = %v", r.Form)
+			}
+			return
+		}
+		if _, ok := r.Form["SmsUrl"]; !ok || r.Form.Get("SmsUrl") != "" {
+			t.Errorf("empty SMS URL must be sent to clear it: %v", r.Form)
+		}
+		if _, ok := r.Form["StatusCallback"]; !ok || r.Form.Get("StatusCallback") != "" {
+			t.Errorf("empty status URL must be sent to clear it: %v", r.Form)
+		}
+	}))
+
+	if err := provider.ConfigureNumberWebhooks(context.Background(), "PN-provider-ref", NumberWebhookConfig{
+		SMSURL: "https://api.example.com/inbound", StatusCallbackURL: "https://api.example.com/status",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.ConfigureNumberWebhooks(context.Background(), "PN-provider-ref", NumberWebhookConfig{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestTwilioMapsErrorsWithoutLeakingResponseBody(t *testing.T) {
 	const secret = "response-secret"
 	provider := newTestTwilio(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -173,6 +207,30 @@ func TestTwilioMapsErrorsWithoutLeakingResponseBody(t *testing.T) {
 	_, err := provider.SearchNumbers(context.Background(), SearchNumbersRequest{CountryCode: "US"})
 	if !errors.Is(err, ErrProviderUnavailable) || strings.Contains(err.Error(), secret) {
 		t.Fatalf("provider error = %v", err)
+	}
+}
+
+func TestTwilioMapsHTTPStatusesToInternalErrors(t *testing.T) {
+	cases := []struct {
+		name   string
+		status int
+		want   error
+	}{
+		{name: "rejected", status: http.StatusBadRequest, want: ErrProviderRejected},
+		{name: "not found", status: http.StatusNotFound, want: ErrProviderNotFound},
+		{name: "rate limited", status: http.StatusTooManyRequests, want: ErrProviderRateLimited},
+		{name: "unavailable", status: http.StatusBadGateway, want: ErrProviderUnavailable},
+	}
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			provider := newTestTwilio(t, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(testCase.status)
+			}))
+			_, err := provider.SearchNumbers(context.Background(), SearchNumbersRequest{CountryCode: "US"})
+			if !errors.Is(err, testCase.want) {
+				t.Fatalf("error = %v, want %v", err, testCase.want)
+			}
+		})
 	}
 }
 

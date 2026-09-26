@@ -2,6 +2,8 @@
 
 Interactive Swagger UI: `/docs/` on the running API (for example, `http://localhost:8080/docs/`). The same path works after deployment. The machine-readable OpenAPI 3.0 specification is available at `/docs/openapi.yaml` and in [openapi.yaml](openapi.yaml).
 
+This reference documents only routes currently registered by the server. Internal telephony/provider support and rental/order/payment persistence exist, but are not yet exposed as HTTP endpoints.
+
 Base URL (local): `http://localhost:8080`
 All bodies are JSON (`Content-Type: application/json`). Max request body: 16 KiB.
 Unknown JSON fields are rejected. Every response includes an `X-Request-ID` header.

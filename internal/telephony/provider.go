@@ -101,3 +101,13 @@ type Provider interface {
 type InboundMessageParser interface {
 	ParseInboundMessage(ctx context.Context, webhook InboundWebhook) (InboundMessage, error)
 }
+
+type NumberWebhookConfig struct {
+	SMSURL            string
+	StatusCallbackURL string
+}
+
+type WebhookConfigurer interface {
+	// Empty URLs clear the corresponding provider webhook configuration.
+	ConfigureNumberWebhooks(ctx context.Context, providerReference string, config NumberWebhookConfig) error
+}

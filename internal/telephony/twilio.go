@@ -32,6 +32,7 @@ type Twilio struct {
 
 var _ Provider = (*Twilio)(nil)
 var _ InboundMessageParser = (*Twilio)(nil)
+var _ WebhookConfigurer = (*Twilio)(nil)
 
 func NewTwilio(accountSID, authToken string) (*Twilio, error) {
 	accountSID = strings.TrimSpace(accountSID)
@@ -192,6 +193,19 @@ func (t *Twilio) ReleaseNumber(ctx context.Context, providerReference string) er
 	}
 	path := "/IncomingPhoneNumbers/" + url.PathEscape(providerReference) + ".json"
 	return t.request(ctx, http.MethodDelete, path, nil, nil)
+}
+
+func (t *Twilio) ConfigureNumberWebhooks(ctx context.Context, providerReference string, config NumberWebhookConfig) error {
+	providerReference = strings.TrimSpace(providerReference)
+	if providerReference == "" {
+		return fmt.Errorf("%w: provider reference is required", ErrInvalidRequest)
+	}
+	path := "/IncomingPhoneNumbers/" + url.PathEscape(providerReference) + ".json"
+	form := url.Values{
+		"SmsUrl":         {config.SMSURL},
+		"StatusCallback": {config.StatusCallbackURL},
+	}
+	return t.request(ctx, http.MethodPost, path, form, nil)
 }
 
 func (t *Twilio) SendMessage(ctx context.Context, request SendMessageRequest) (MessageReceipt, error) {

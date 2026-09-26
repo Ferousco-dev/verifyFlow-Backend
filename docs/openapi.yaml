@@ -3,9 +3,15 @@ info:
   title: Verifyflow API
   version: 0.4.0
   description: |
-    Authentication and account-security API. All request bodies are JSON. Responses include an
-    `X-Request-ID` header. Access tokens are short-lived JWTs; refresh tokens are opaque,
-    single-use tokens that rotate on refresh.
+    Public HTTP contract for the currently registered health, authentication, and account routes.
+    All request bodies are JSON. Responses include an `X-Request-ID` header. Access tokens are
+    short-lived JWTs; refresh tokens are opaque, single-use tokens that rotate on refresh.
+
+    The backend also contains internal foundations for provider-neutral telephony, a Twilio
+    adapter (number search/provision/release, webhook configuration, outbound SMS, and signed
+    inbound SMS normalization), and PostgreSQL rental, order, payment, and webhook-event tables.
+    These capabilities are not yet exposed as public HTTP endpoints and therefore do not appear
+    in this OpenAPI contract.
 servers:
   - url: /
     description: Same origin as this documentation page
