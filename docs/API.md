@@ -1,5 +1,7 @@
 # Migo API — v0.4
 
+Machine-readable OpenAPI 3.0 specification: [openapi.yaml](openapi.yaml). Import it into Swagger UI or Swagger Editor for interactive documentation.
+
 Base URL (local): `http://localhost:8080`
 All bodies are JSON (`Content-Type: application/json`). Max request body: 16 KiB.
 Unknown JSON fields are rejected. Every response includes an `X-Request-ID` header.
