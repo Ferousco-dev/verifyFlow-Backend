@@ -66,8 +66,8 @@ func (f domainFixture) insertOrder(t *testing.T) string {
 	var id string
 	err := f.pool.QueryRow(context.Background(),
 		`INSERT INTO orders (user_id, rental_plan_id, plan_code_snapshot, plan_name_snapshot,
-		 duration_seconds_snapshot, price_minor_units_snapshot, currency_snapshot)
-		 VALUES ($1::uuid, $2::uuid, 'hourly', 'One hour', 3600, 500, 'USD') RETURNING id::text`,
+		 duration_seconds_snapshot, price_minor_units_snapshot, currency_snapshot, idempotency_key, order_status)
+		 VALUES ($1::uuid, $2::uuid, 'hourly', 'One hour', 3600, 500, 'USD', gen_random_uuid()::text, 'PENDING') RETURNING id::text`,
 		f.userID, f.planID,
 	).Scan(&id)
 	if err != nil {
@@ -92,7 +92,8 @@ func (f domainFixture) insertNumber(t *testing.T, reference, phoneNumber string)
 
 func insertRental(ctx context.Context, execer domainExecer, orderID, userID, providerNumberID string) error {
 	_, err := execer.Exec(ctx,
-		`INSERT INTO rentals (order_id, user_id, provider_number_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`,
+		`INSERT INTO rentals (order_id, user_id, provider_number_id, reservation_expires_at)
+		 VALUES ($1::uuid, $2::uuid, $3::uuid, now() + interval '15 minutes')`,
 		orderID, userID, providerNumberID,
 	)
 	return err
@@ -174,6 +175,11 @@ func cancelReservedRental(t *testing.T, f domainFixture, rentalID, providerNumbe
 		t.Fatal(err)
 	}
 	if _, err := tx.Exec(ctx, `UPDATE rentals SET ended_at = now() WHERE id = $1::uuid`, rentalID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE orders SET order_status = 'EXPIRED' WHERE id = (SELECT order_id FROM rentals WHERE id = $1::uuid)`, rentalID,
+	); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(ctx); err != nil {
@@ -332,7 +338,8 @@ func TestDomainSchemaEnforcesRentalOwnershipAndWebhookIdempotency(t *testing.T) 
 	numberID := f.insertNumber(t, "number-ref", "+14155550100")
 	rentalID := reserveRental(t, f, orderID, numberID)
 	_, err := f.pool.Exec(ctx,
-		`INSERT INTO rentals (order_id, user_id, provider_number_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`,
+		`INSERT INTO rentals (order_id, user_id, provider_number_id, reservation_expires_at)
+		 VALUES ($1::uuid, $2::uuid, $3::uuid, now() + interval '15 minutes')`,
 		orderID, f.userID, numberID,
 	)
 	assertPostgresError(t, err, "23505", "rentals_order_id_key")
@@ -377,7 +384,8 @@ func TestDomainSchemaEnforcesRentalOwnershipAndWebhookIdempotency(t *testing.T) 
 	otherOrderID := f.insertOrder(t)
 	otherNumberID := f.insertNumber(t, "other-number-ref", "+14155550102")
 	_, err = f.pool.Exec(ctx,
-		`INSERT INTO rentals (order_id, user_id, provider_number_id) VALUES ($1::uuid, $2::uuid, $3::uuid)`,
+		`INSERT INTO rentals (order_id, user_id, provider_number_id, reservation_expires_at)
+		 VALUES ($1::uuid, $2::uuid, $3::uuid, now() + interval '15 minutes')`,
 		otherOrderID, otherUserID, otherNumberID,
 	)
 	if err == nil {
