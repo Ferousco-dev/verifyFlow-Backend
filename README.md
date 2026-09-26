@@ -69,6 +69,7 @@ curl -s -X POST localhost:8080/api/v1/auth/register -H 'Content-Type: applicatio
 ```
 
 API reference: [docs/API.md](docs/API.md)
+Interactive Swagger UI: `http://localhost:8080/docs/` (or `/docs/` on the deployed API).
 
 ## Layout
 

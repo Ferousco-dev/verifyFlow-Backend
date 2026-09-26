@@ -1,14 +1,14 @@
 openapi: 3.0.3
 info:
-  title: Migo API
+  title: Verifyflow API
   version: 0.4.0
   description: |
     Authentication and account-security API. All request bodies are JSON. Responses include an
     `X-Request-ID` header. Access tokens are short-lived JWTs; refresh tokens are opaque,
     single-use tokens that rotate on refresh.
 servers:
-  - url: http://localhost:8080
-    description: Local development
+  - url: /
+    description: Same origin as this documentation page
 tags:
   - name: Health
   - name: Authentication

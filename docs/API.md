@@ -1,6 +1,6 @@
 # Migo API — v0.4
 
-Machine-readable OpenAPI 3.0 specification: [openapi.yaml](openapi.yaml). Import it into Swagger UI or Swagger Editor for interactive documentation.
+Interactive Swagger UI: `/docs/` on the running API (for example, `http://localhost:8080/docs/`). The same path works after deployment. The machine-readable OpenAPI 3.0 specification is available at `/docs/openapi.yaml` and in [openapi.yaml](openapi.yaml).
 
 Base URL (local): `http://localhost:8080`
 All bodies are JSON (`Content-Type: application/json`). Max request body: 16 KiB.

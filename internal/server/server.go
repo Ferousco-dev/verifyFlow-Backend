@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"time"
 
+	apidocs "migo/docs"
 	"migo/internal/auth"
 	"migo/internal/httpx"
 	"migo/internal/ratelimit"
@@ -76,6 +77,17 @@ func New(d Deps) http.Handler {
 	limit := func(l ratelimit.Limiter) func(http.Handler) http.Handler {
 		return ratelimit.Middleware(l, ratelimit.IPKey, d.Log)
 	}
+	mux.Handle("GET /docs", http.RedirectHandler("/docs/", http.StatusPermanentRedirect))
+	mux.HandleFunc("GET /docs/openapi.yaml", func(w http.ResponseWriter, r *http.Request) {
+		spec, err := apidocs.Files.ReadFile("openapi.yaml")
+		if err != nil {
+			http.Error(w, "OpenAPI specification unavailable", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/yaml; charset=utf-8")
+		_, _ = w.Write(spec)
+	})
+	mux.Handle("GET /docs/", http.StripPrefix("/docs/", http.FileServer(http.FS(apidocs.Files))))
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
