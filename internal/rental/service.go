@@ -54,7 +54,46 @@ type ReserveInput struct {
 	ReservationExpiresAt time.Time
 }
 
+type NumberFilter struct {
+	NumberType   string
+	RequireSMS   bool
+	RequireMMS   bool
+	RequireVoice bool
+	Cursor       string
+	Limit        int
+}
+
+type NumberSummary struct {
+	ID           string
+	PhoneNumber  string
+	NumberType   string
+	SMSEnabled   bool
+	MMSEnabled   bool
+	VoiceEnabled bool
+}
+
+type NumbersPage struct {
+	Numbers    []NumberSummary
+	NextCursor string
+}
+
+type Plan struct {
+	ID              string
+	Code            string
+	Name            string
+	DurationSeconds int32
+	PriceMinorUnits int64
+	Currency        string
+}
+
+const (
+	defaultSearchLimit = 20
+	maxSearchLimit     = 100
+)
+
 type Store interface {
+	SearchNumbers(context.Context, NumberFilter) (NumbersPage, error)
+	ListPlans(context.Context) ([]Plan, error)
 	Reserve(context.Context, ReserveInput) (Reservation, error)
 	GetOrder(context.Context, string, string) (Order, error)
 	ExpireReservation(context.Context, string, time.Time) (bool, error)
@@ -74,6 +113,21 @@ func NewService(store Store, reservationTTL time.Duration) (*Service, error) {
 		return nil, fmt.Errorf("%w: reservation TTL must be positive", ErrInvalidRequest)
 	}
 	return &Service{store: store, reservationTTL: reservationTTL, now: time.Now}, nil
+}
+
+func (s *Service) SearchNumbers(ctx context.Context, filter NumberFilter) (NumbersPage, error) {
+	if filter.Limit <= 0 || filter.Limit > maxSearchLimit {
+		filter.Limit = defaultSearchLimit
+	}
+	if filter.NumberType != "" &&
+		filter.NumberType != "Local" && filter.NumberType != "TollFree" && filter.NumberType != "Mobile" {
+		return NumbersPage{}, ErrInvalidRequest
+	}
+	return s.store.SearchNumbers(ctx, filter)
+}
+
+func (s *Service) ListPlans(ctx context.Context) ([]Plan, error) {
+	return s.store.ListPlans(ctx)
 }
 
 func (s *Service) Reserve(ctx context.Context, authenticatedUserID string, request ReserveRequest) (Reservation, error) {

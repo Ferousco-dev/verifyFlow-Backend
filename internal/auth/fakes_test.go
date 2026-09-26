@@ -33,6 +33,9 @@ func (f *fakeUsers) Create(_ context.Context, u user.User) (user.User, error) {
 	f.n++
 	u.ID = "00000000-0000-0000-0000-" + pad(f.n)
 	u.IsActive = true
+	if u.Role == "" {
+		u.Role = user.RoleUser
+	}
 	u.CreatedAt = time.Now()
 	f.byID[u.ID] = &u
 	return u, nil
@@ -71,6 +74,29 @@ func (f *fakeUsers) UpdatePasswordHash(_ context.Context, id, hash string) error
 	defer f.mu.Unlock()
 	f.byID[id].PasswordHash = &hash
 	return nil
+}
+
+func (f *fakeUsers) UpdateRole(_ context.Context, id, role string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	e, ok := f.byID[id]
+	if !ok {
+		return user.ErrNotFound
+	}
+	e.Role = role
+	return nil
+}
+
+func (f *fakeUsers) CountAdmins(context.Context) (int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	count := 0
+	for _, e := range f.byID {
+		if e.Role == user.RoleAdmin {
+			count++
+		}
+	}
+	return count, nil
 }
 
 func (f *fakeUsers) setActive(id string, v bool) {

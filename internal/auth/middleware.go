@@ -71,3 +71,32 @@ func RequireVerifiedEmail(svc *Service) func(http.Handler) http.Handler {
 		})
 	}
 }
+
+// RequireRole rejects users whose role does not match. It must run AFTER
+// RequireAuth. Use it on operator/admin-only routes (e.g. changing another
+// user's role, managing provider configs).
+func RequireRole(svc *Service, role string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			userID, ok := UserIDFromContext(r.Context())
+			if !ok {
+				unauthorized(w)
+				return
+			}
+			u, err := svc.Me(r.Context(), userID)
+			if err != nil {
+				if errors.Is(err, ErrUnauthorized) {
+					unauthorized(w)
+					return
+				}
+				httpx.WriteError(w, http.StatusInternalServerError, "internal_error", "Something went wrong.", nil)
+				return
+			}
+			if u.Role != role {
+				httpx.WriteError(w, http.StatusForbidden, "forbidden", "You do not have permission to perform this action.", nil)
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}

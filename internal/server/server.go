@@ -11,7 +11,10 @@ import (
 	apidocs "migo/docs"
 	"migo/internal/auth"
 	"migo/internal/httpx"
+	"migo/internal/providerconfig"
 	"migo/internal/ratelimit"
+	"migo/internal/rental"
+	"migo/internal/user"
 )
 
 // Pinger is satisfied by *pgxpool.Pool.
@@ -67,6 +70,9 @@ type Deps struct {
 	DB             Pinger
 	Auth           *auth.Handler
 	Tokens         *auth.TokenManager
+	AuthService    *auth.Service
+	Rental         *rental.Handler
+	ProviderConfig *providerconfig.Handler
 	Limiters       Limiters
 	AllowedOrigins []string
 	TrustedProxies []*net.IPNet
@@ -115,6 +121,32 @@ func New(d Deps) http.Handler {
 	mux.Handle("GET /api/v1/me", requireAuth(http.HandlerFunc(d.Auth.Me)))
 	mux.Handle("POST /api/v1/auth/resend-verification", limit(d.Limiters.Resend)(requireAuth(http.HandlerFunc(d.Auth.ResendVerification))))
 	mux.Handle("POST /api/v1/auth/change-password", limit(d.Limiters.ChangePassword)(requireAuth(http.HandlerFunc(d.Auth.ChangePassword))))
+
+	if d.AuthService != nil {
+		requireAdmin := func(next http.Handler) http.Handler {
+			return requireAuth(auth.RequireRole(d.AuthService, user.RoleAdmin)(next))
+		}
+		mux.Handle("PATCH /api/v1/admin/users/{id}/role", requireAdmin(http.HandlerFunc(d.Auth.SetUserRole)))
+
+		if d.ProviderConfig != nil {
+			mux.Handle("POST /api/v1/admin/provider-configs", requireAdmin(http.HandlerFunc(d.ProviderConfig.Create)))
+			mux.Handle("GET /api/v1/admin/provider-configs", requireAdmin(http.HandlerFunc(d.ProviderConfig.List)))
+			mux.Handle("PATCH /api/v1/admin/provider-configs/{id}", requireAdmin(http.HandlerFunc(d.ProviderConfig.SetEnabled)))
+		}
+	}
+
+	if d.Rental != nil {
+		requireVerified := requireAuth
+		if d.AuthService != nil {
+			requireVerified = func(next http.Handler) http.Handler {
+				return requireAuth(auth.RequireVerifiedEmail(d.AuthService)(next))
+			}
+		}
+		mux.Handle("GET /api/v1/numbers", requireVerified(http.HandlerFunc(d.Rental.SearchNumbers)))
+		mux.Handle("GET /api/v1/rental-plans", requireVerified(http.HandlerFunc(d.Rental.ListPlans)))
+		mux.Handle("POST /api/v1/rentals", requireVerified(http.HandlerFunc(d.Rental.Reserve)))
+		mux.Handle("GET /api/v1/orders/{id}", requireVerified(http.HandlerFunc(d.Rental.GetOrder)))
+	}
 
 	// Outermost first: logging sees everything; CORS wraps the router so
 	// preflights and 429s carry the right headers; client-IP resolution runs

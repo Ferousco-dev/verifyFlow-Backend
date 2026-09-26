@@ -2,6 +2,7 @@
 package config
 
 import (
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"net"
@@ -38,6 +39,19 @@ type Config struct {
 	// token (#token=...). EmailVerificationTTL is the link lifetime.
 	EmailVerificationURL string
 	EmailVerificationTTL time.Duration
+
+	// RentalReservationTTL is how long a number reservation holds before it
+	// is eligible for expiry (freeing the number back to AVAILABLE).
+	RentalReservationTTL time.Duration
+
+	// ProviderCredentialKeys are the AES-256 keys (32 raw bytes each) used to
+	// encrypt provider_configs.credentials_ciphertext, keyed by version.
+	// ProviderCredentialKeyVersion names which key new encryptions use.
+	// Rotation is manual: add a new PROVIDER_CREDENTIAL_KEYS entry, point
+	// PROVIDER_CREDENTIAL_KEY_VERSION at it, re-encrypt existing rows, then
+	// drop the old entry once nothing references it anymore.
+	ProviderCredentialKeys       map[string][]byte
+	ProviderCredentialKeyVersion string
 }
 
 const minSecretLen = 32
@@ -149,6 +163,12 @@ func Load(getenv func(string) string) (Config, error) {
 	} else if cfg.EmailVerificationTTL < time.Hour || cfg.EmailVerificationTTL > 7*24*time.Hour {
 		errs = append(errs, errors.New("EMAIL_VERIFICATION_TTL must be between 1h and 168h"))
 	}
+
+	if cfg.RentalReservationTTL, err = parseDuration(get("RENTAL_RESERVATION_TTL", "15m"), "RENTAL_RESERVATION_TTL"); err != nil {
+		errs = append(errs, err)
+	} else if cfg.RentalReservationTTL < time.Minute || cfg.RentalReservationTTL > time.Hour {
+		errs = append(errs, errors.New("RENTAL_RESERVATION_TTL must be between 1m and 1h"))
+	}
 	verifyURL := get("EMAIL_VERIFICATION_URL", "")
 	if verifyURL == "" && len(cfg.AllowedOrigins) > 0 {
 		verifyURL = cfg.AllowedOrigins[0] + "/verify-email"
@@ -159,10 +179,55 @@ func Load(getenv func(string) string) (Config, error) {
 		errs = append(errs, err)
 	}
 
+	cfg.ProviderCredentialKeys, cfg.ProviderCredentialKeyVersion, err = parseProviderCredentialKeys(
+		get("PROVIDER_CREDENTIAL_KEYS", ""), get("PROVIDER_CREDENTIAL_KEY_VERSION", ""))
+	if err != nil {
+		errs = append(errs, err)
+	}
+
 	if len(errs) > 0 {
 		return Config{}, errors.Join(errs...)
 	}
 	return cfg, nil
+}
+
+// parseProviderCredentialKeys parses "v1:base64key,v2:base64key" into a
+// version->key map. Both arguments may be empty, meaning provider credential
+// encryption is not configured (fine until an admin tries to store one).
+func parseProviderCredentialKeys(raw, currentVersion string) (map[string][]byte, string, error) {
+	if strings.TrimSpace(raw) == "" {
+		if currentVersion != "" {
+			return nil, "", errors.New("PROVIDER_CREDENTIAL_KEY_VERSION set without any PROVIDER_CREDENTIAL_KEYS")
+		}
+		return nil, "", nil
+	}
+	keys := map[string][]byte{}
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		version, encoded, ok := strings.Cut(entry, ":")
+		version = strings.TrimSpace(version)
+		if !ok || version == "" || encoded == "" {
+			return nil, "", fmt.Errorf("PROVIDER_CREDENTIAL_KEYS entry %q must be formatted version:base64key", entry)
+		}
+		key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encoded))
+		if err != nil {
+			return nil, "", fmt.Errorf("PROVIDER_CREDENTIAL_KEYS entry %q: %w", version, err)
+		}
+		if len(key) != 32 {
+			return nil, "", fmt.Errorf("PROVIDER_CREDENTIAL_KEYS entry %q: key must decode to 32 bytes, got %d", version, len(key))
+		}
+		keys[version] = key
+	}
+	if currentVersion == "" {
+		return nil, "", errors.New("PROVIDER_CREDENTIAL_KEY_VERSION is required when PROVIDER_CREDENTIAL_KEYS is set")
+	}
+	if _, ok := keys[currentVersion]; !ok {
+		return nil, "", fmt.Errorf("PROVIDER_CREDENTIAL_KEY_VERSION %q has no matching PROVIDER_CREDENTIAL_KEYS entry", currentVersion)
+	}
+	return keys, currentVersion, nil
 }
 
 func parseDuration(s, name string) (time.Duration, error) {

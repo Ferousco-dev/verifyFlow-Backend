@@ -16,6 +16,9 @@ import (
 	"migo/internal/config"
 	"migo/internal/database"
 	"migo/internal/mailer"
+	"migo/internal/providerconfig"
+	"migo/internal/providercrypto"
+	"migo/internal/rental"
 	"migo/internal/server"
 	"migo/internal/user"
 	"migo/migrations"
@@ -86,6 +89,29 @@ func run(log *slog.Logger) error {
 	svc.EnableEmailVerification(auth.NewVerifyRepository(pool), mailQueue, cfg.EmailVerificationURL, cfg.EmailVerificationTTL, log)
 	svc.EnableChangePassword(auth.NewCredentialRepository(pool), mailQueue, log)
 
+	rentalSvc, err := rental.NewService(rental.NewRepository(pool), cfg.RentalReservationTTL)
+	if err != nil {
+		return err
+	}
+	rentalHandler := rental.NewHandler(rentalSvc)
+
+	// Provider credential encryption is optional until PROVIDER_CREDENTIAL_KEYS
+	// is set; without it, admins simply cannot create provider configs yet.
+	var providerConfigHandler *providerconfig.Handler
+	if len(cfg.ProviderCredentialKeys) > 0 {
+		keyRing, err := providercrypto.NewKeyRing(cfg.ProviderCredentialKeys, cfg.ProviderCredentialKeyVersion)
+		if err != nil {
+			return err
+		}
+		providerConfigSvc, err := providerconfig.NewService(providerconfig.NewRepository(pool), keyRing)
+		if err != nil {
+			return err
+		}
+		providerConfigHandler = providerconfig.NewHandler(providerConfigSvc)
+	} else {
+		log.Warn("PROVIDER_CREDENTIAL_KEYS not set: provider config management is disabled")
+	}
+
 	authHandler := auth.NewHandler(svc, log)
 	var limiters server.Limiters
 	if cfg.RateLimitEnabled {
@@ -104,7 +130,8 @@ func run(log *slog.Logger) error {
 	srv := &http.Server{
 		Addr: ":" + cfg.Port,
 		Handler: server.New(server.Deps{
-			Log: log, DB: pool, Auth: authHandler, Tokens: tokens,
+			Log: log, DB: pool, Auth: authHandler, Tokens: tokens, AuthService: svc,
+			Rental: rentalHandler, ProviderConfig: providerConfigHandler,
 			Limiters: limiters, AllowedOrigins: cfg.AllowedOrigins, TrustedProxies: cfg.TrustedProxies,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

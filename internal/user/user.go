@@ -13,6 +13,17 @@ var (
 	ErrUsernameTaken = errors.New("username already taken")
 )
 
+// Roles are exhaustive and match the users_role_check DB constraint.
+const (
+	RoleUser  = "user"
+	RoleAdmin = "admin"
+)
+
+// IsValidRole reports whether role is one of the known roles.
+func IsValidRole(role string) bool {
+	return role == RoleUser || role == RoleAdmin
+}
+
 type User struct {
 	ID            string
 	FullName      string
@@ -21,6 +32,7 @@ type User struct {
 	PasswordHash  *string // nil for OAuth-only accounts (future)
 	EmailVerified bool
 	IsActive      bool
+	Role          string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }

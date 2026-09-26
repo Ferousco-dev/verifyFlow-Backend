@@ -15,6 +15,18 @@ type fakeStore struct {
 	getErr       error
 	expired      bool
 	expireErr    error
+	numbersPage  NumbersPage
+	searchErr    error
+	plans        []Plan
+	plansErr     error
+}
+
+func (f *fakeStore) SearchNumbers(context.Context, NumberFilter) (NumbersPage, error) {
+	return f.numbersPage, f.searchErr
+}
+
+func (f *fakeStore) ListPlans(context.Context) ([]Plan, error) {
+	return f.plans, f.plansErr
 }
 
 func (f *fakeStore) Reserve(_ context.Context, input ReserveInput) (Reservation, error) {
@@ -88,6 +100,28 @@ func TestNewServiceRequiresStoreAndPositiveTTL(t *testing.T) {
 	}
 	if _, err := NewService(&fakeStore{}, 0); !errors.Is(err, ErrInvalidRequest) {
 		t.Fatalf("zero TTL error = %v", err)
+	}
+}
+
+func TestServiceSearchNumbersRejectsInvalidType(t *testing.T) {
+	store := &fakeStore{}
+	service, err := NewService(store, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SearchNumbers(context.Background(), NumberFilter{NumberType: "bogus"}); !errors.Is(err, ErrInvalidRequest) {
+		t.Fatalf("SearchNumbers error = %v", err)
+	}
+}
+
+func TestServiceSearchNumbersClampsLimit(t *testing.T) {
+	store := &fakeStore{}
+	service, err := NewService(store, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.SearchNumbers(context.Background(), NumberFilter{Limit: 1000}); err != nil {
+		t.Fatal(err)
 	}
 }
 

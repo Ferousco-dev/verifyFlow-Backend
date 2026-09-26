@@ -16,6 +16,8 @@ var (
 	ErrInvalidCredentials  = errors.New("invalid email or password")
 	ErrInvalidRefreshToken = errors.New("invalid refresh token")
 	ErrUnauthorized        = errors.New("unauthorized")
+	ErrInvalidRole         = errors.New("invalid role")
+	ErrLastAdmin           = errors.New("cannot remove the last remaining admin")
 )
 
 // UserStore is the user persistence the service depends on.
@@ -24,6 +26,8 @@ type UserStore interface {
 	GetByEmail(ctx context.Context, email string) (user.User, error)
 	GetByID(ctx context.Context, id string) (user.User, error)
 	UpdatePasswordHash(ctx context.Context, id, hash string) error
+	UpdateRole(ctx context.Context, id, role string) error
+	CountAdmins(ctx context.Context) (int, error)
 }
 
 type Service struct {
@@ -218,6 +222,38 @@ func (s *Service) Me(ctx context.Context, userID string) (user.User, error) {
 		return user.User{}, ErrUnauthorized
 	}
 	return u, nil
+}
+
+// SetUserRole changes targetUserID's role. It refuses to demote the last
+// remaining admin, so an admin can never lock every admin out of the system.
+func (s *Service) SetUserRole(ctx context.Context, targetUserID, role string) (user.User, error) {
+	if !user.IsValidRole(role) {
+		return user.User{}, ErrInvalidRole
+	}
+	target, err := s.users.GetByID(ctx, targetUserID)
+	if errors.Is(err, user.ErrNotFound) {
+		return user.User{}, user.ErrNotFound
+	}
+	if err != nil {
+		return user.User{}, err
+	}
+	if target.Role == role {
+		return target, nil
+	}
+	if target.Role == user.RoleAdmin && role != user.RoleAdmin {
+		count, err := s.users.CountAdmins(ctx)
+		if err != nil {
+			return user.User{}, err
+		}
+		if count <= 1 {
+			return user.User{}, ErrLastAdmin
+		}
+	}
+	if err := s.users.UpdateRole(ctx, targetUserID, role); err != nil {
+		return user.User{}, err
+	}
+	target.Role = role
+	return target, nil
 }
 
 func (s *Service) startSession(ctx context.Context, userID string, meta Meta) (Tokens, error) {

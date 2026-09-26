@@ -16,6 +16,63 @@ type Repository struct {
 
 func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: pool} }
 
+func (r *Repository) SearchNumbers(ctx context.Context, filter NumberFilter) (NumbersPage, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id::text, phone_number, number_type, sms_enabled, mms_enabled, voice_enabled
+		   FROM provider_numbers
+		  WHERE status = 'AVAILABLE'
+		    AND ($1 = '' OR number_type = $1)
+		    AND (NOT $2 OR sms_enabled)
+		    AND (NOT $3 OR mms_enabled)
+		    AND (NOT $4 OR voice_enabled)
+		    AND ($5 = '' OR id > $5::uuid)
+		  ORDER BY id
+		  LIMIT $6`,
+		filter.NumberType, filter.RequireSMS, filter.RequireMMS, filter.RequireVoice, filter.Cursor, filter.Limit+1,
+	)
+	if err != nil {
+		return NumbersPage{}, err
+	}
+	defer rows.Close()
+
+	var page NumbersPage
+	for rows.Next() {
+		var n NumberSummary
+		if err := rows.Scan(&n.ID, &n.PhoneNumber, &n.NumberType, &n.SMSEnabled, &n.MMSEnabled, &n.VoiceEnabled); err != nil {
+			return NumbersPage{}, err
+		}
+		page.Numbers = append(page.Numbers, n)
+	}
+	if err := rows.Err(); err != nil {
+		return NumbersPage{}, err
+	}
+	if len(page.Numbers) > filter.Limit {
+		page.NextCursor = page.Numbers[filter.Limit-1].ID
+		page.Numbers = page.Numbers[:filter.Limit]
+	}
+	return page, nil
+}
+
+func (r *Repository) ListPlans(ctx context.Context) ([]Plan, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT id::text, plan_code, name, duration_seconds, price_minor_units, currency
+		   FROM rental_plans WHERE is_active ORDER BY plan_code`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var plans []Plan
+	for rows.Next() {
+		var p Plan
+		if err := rows.Scan(&p.ID, &p.Code, &p.Name, &p.DurationSeconds, &p.PriceMinorUnits, &p.Currency); err != nil {
+			return nil, err
+		}
+		plans = append(plans, p)
+	}
+	return plans, rows.Err()
+}
+
 func (r *Repository) Reserve(ctx context.Context, input ReserveInput) (Reservation, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {

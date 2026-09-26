@@ -54,12 +54,13 @@ type userResponse struct {
 	Username      string    `json:"username"`
 	Email         string    `json:"email"`
 	EmailVerified bool      `json:"email_verified"`
+	Role          string    `json:"role"`
 	CreatedAt     time.Time `json:"created_at"`
 }
 
 func toUserResponse(u user.User) userResponse {
 	return userResponse{ID: u.ID, FullName: u.FullName, Username: u.Username, Email: u.Email,
-		EmailVerified: u.EmailVerified, CreatedAt: u.CreatedAt}
+		EmailVerified: u.EmailVerified, Role: u.Role, CreatedAt: u.CreatedAt}
 }
 
 type tokenResponse struct {
@@ -202,6 +203,29 @@ func (h *Handler) Me(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, map[string]any{"user": toUserResponse(u)})
 }
 
+// SetUserRole is admin-only (mounted behind RequireAuth + RequireRole).
+// The path value "id" names the target user; admins may act on any account,
+// including their own, though the service refuses to demote the last admin.
+func (h *Handler) SetUserRole(w http.ResponseWriter, r *http.Request) {
+	targetUserID := r.PathValue("id")
+	var req struct {
+		Role string `json:"role"`
+	}
+	if err := httpx.DecodeJSON(w, r, &req, maxBodyBytes); err != nil {
+		httpx.WriteDecodeError(w, err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), requestTimeout)
+	defer cancel()
+
+	u, err := h.svc.SetUserRole(ctx, targetUserID, req.Role)
+	if err != nil {
+		h.writeError(w, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusOK, map[string]any{"user": toUserResponse(u)})
+}
+
 func (h *Handler) writeError(w http.ResponseWriter, err error) {
 	var ve *ValidationError
 	switch {
@@ -223,6 +247,12 @@ func (h *Handler) writeError(w http.ResponseWriter, err error) {
 		httpx.WriteError(w, http.StatusBadRequest, "invalid_reset_token", "This reset link is invalid or has expired. Please request a new one.", nil)
 	case errors.Is(err, ErrUnauthorized):
 		unauthorized(w)
+	case errors.Is(err, ErrInvalidRole):
+		httpx.WriteError(w, http.StatusBadRequest, "invalid_role", "role must be one of: user, admin.", nil)
+	case errors.Is(err, ErrLastAdmin):
+		httpx.WriteError(w, http.StatusConflict, "last_admin", "Cannot remove the last remaining admin.", nil)
+	case errors.Is(err, user.ErrNotFound):
+		httpx.WriteError(w, http.StatusNotFound, "user_not_found", "User not found.", nil)
 	case errors.Is(err, context.DeadlineExceeded):
 		httpx.WriteError(w, http.StatusGatewayTimeout, "timeout", "The request timed out.", nil)
 	default:

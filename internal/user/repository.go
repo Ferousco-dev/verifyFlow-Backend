@@ -18,12 +18,12 @@ type Repository struct {
 func NewRepository(pool *pgxpool.Pool) *Repository { return &Repository{pool: pool} }
 
 const userColumns = `id::text, full_name, username, email, password_hash,
-	email_verified, is_active, created_at, updated_at`
+	email_verified, is_active, role, created_at, updated_at`
 
 func scanUser(row pgx.Row) (User, error) {
 	var u User
 	err := row.Scan(&u.ID, &u.FullName, &u.Username, &u.Email, &u.PasswordHash,
-		&u.EmailVerified, &u.IsActive, &u.CreatedAt, &u.UpdatedAt)
+		&u.EmailVerified, &u.IsActive, &u.Role, &u.CreatedAt, &u.UpdatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return User{}, ErrNotFound
 	}
@@ -66,4 +66,25 @@ func (r *Repository) UpdatePasswordHash(ctx context.Context, id, hash string) er
 	_, err := r.pool.Exec(ctx,
 		`UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1::uuid`, id, hash)
 	return err
+}
+
+// UpdateRole sets the target user's role. It returns ErrNotFound if no such
+// user exists.
+func (r *Repository) UpdateRole(ctx context.Context, id, role string) error {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE users SET role = $2, updated_at = now() WHERE id = $1::uuid`, id, role)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// CountAdmins returns how many active users currently hold the admin role.
+func (r *Repository) CountAdmins(ctx context.Context) (int, error) {
+	var count int
+	err := r.pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE role = 'admin'`).Scan(&count)
+	return count, err
 }
