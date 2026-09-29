@@ -21,9 +21,12 @@ import (
 	"migo/internal/payment"
 	"migo/internal/providerconfig"
 	"migo/internal/providercrypto"
+	"migo/internal/renewal"
 	"migo/internal/rental"
 	"migo/internal/server"
 	"migo/internal/user"
+	"migo/internal/wallet"
+	"migo/internal/walletpurchase"
 	"migo/migrations"
 )
 
@@ -70,6 +73,8 @@ func run(log *slog.Logger) error {
 		return err
 	}
 
+	mailer.DefaultBrand = mailer.Brand{Name: cfg.MailBrandName, LogoURL: cfg.MailLogoURL}
+
 	// Email is sent through Resend when configured. In development without a
 	// Resend API key, messages are logged instead. Delivery is asynchronous.
 	var sender mailer.Sender
@@ -89,7 +94,11 @@ func run(log *slog.Logger) error {
 	}()
 	svc.EnablePasswordReset(auth.NewResetRepository(pool), mailQueue, cfg.PasswordResetURL, cfg.PasswordResetTTL, log)
 
-	svc.EnableEmailVerification(auth.NewVerifyRepository(pool), mailQueue, cfg.EmailVerificationURL, cfg.EmailVerificationTTL, log)
+	dashboardURL := ""
+	if len(cfg.AllowedOrigins) > 0 {
+		dashboardURL = cfg.AllowedOrigins[0] + "/dashboard"
+	}
+	svc.EnableEmailVerification(auth.NewVerifyRepository(pool), mailQueue, cfg.EmailVerificationURL, dashboardURL, cfg.EmailVerificationTTL, log)
 	svc.EnableChangePassword(auth.NewCredentialRepository(pool), mailQueue, log)
 
 	rentalSvc, err := rental.NewService(rental.NewRepository(pool), cfg.RentalReservationTTL)
@@ -97,6 +106,46 @@ func run(log *slog.Logger) error {
 		return err
 	}
 	rentalHandler := rental.NewHandler(rentalSvc)
+	walletSvc, err := wallet.NewService(wallet.NewRepository(pool))
+	if err != nil {
+		return err
+	}
+	walletHandler := wallet.NewHandler(walletSvc)
+
+	renewalSvc, err := renewal.NewService(rentalSvc, walletSvc)
+	if err != nil {
+		return err
+	}
+	topUpURL := ""
+	if len(cfg.AllowedOrigins) > 0 {
+		topUpURL = cfg.AllowedOrigins[0] + "/wallet"
+	}
+	renewalSvc.EnableFailureEmails(mailQueue, topUpURL)
+	renewalHandler := renewal.NewHandler(renewalSvc)
+
+	// Runs the monthly (or whatever a plan's duration is) rental renewal
+	// pass on a fixed interval: re-bill each active rental whose period has
+	// ended, or release it if the customer's wallet can't cover the next
+	// one. Stops when ctx is cancelled (process shutdown).
+	go func() {
+		ticker := time.NewTicker(cfg.RenewalInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				result, err := renewalSvc.RunDue(ctx)
+				if err != nil {
+					log.Error("renewal run failed", "error", err)
+					continue
+				}
+				if result.Renewed > 0 || result.Expired > 0 || result.Failed > 0 {
+					log.Info("renewal run complete", "renewed", result.Renewed, "expired", result.Expired, "failed", result.Failed)
+				}
+			}
+		}
+	}()
 
 	// Provider credential encryption is optional until PROVIDER_CREDENTIAL_KEYS
 	// is set; without it, admins simply cannot create provider configs, and
@@ -105,6 +154,7 @@ func run(log *slog.Logger) error {
 	var providerConfigHandler *providerconfig.Handler
 	var paymentHandler *payment.Handler
 	var messagingHandler *messaging.Handler
+	var walletPurchaseHandler *walletpurchase.Handler
 	if len(cfg.ProviderCredentialKeys) > 0 {
 		keyRing, err := providercrypto.NewKeyRing(cfg.ProviderCredentialKeys, cfg.ProviderCredentialKeyVersion)
 		if err != nil {
@@ -122,11 +172,12 @@ func run(log *slog.Logger) error {
 			return err
 		}
 
+		paystackResolver := payment.NewProviderConfigResolver(providerConfigSvc)
 		paymentSvc, err := payment.NewService(
 			payment.NewRepository(pool),
 			payment.NewRentalOrders(rentalSvc),
 			payment.NewAuthUserEmails(svc),
-			payment.NewProviderConfigResolver(providerConfigSvc),
+			paystackResolver,
 			fulfillmentSvc,
 			cfg.PaystackCallbackURL,
 		)
@@ -134,6 +185,20 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		paymentHandler = payment.NewHandler(paymentSvc)
+		fundingSvc, err := wallet.NewFundingService(walletSvc, wallet.NewRepository(pool), paystackResolver, payment.NewAuthUserEmails(svc), cfg.PaystackCallbackURL)
+		if err != nil {
+			return err
+		}
+		walletHandler.EnableFunding(fundingSvc)
+		paymentSvc.EnableWalletFunding(fundingSvc)
+		fundingSvc.EnableReceipts(mailQueue, payment.NewAuthUserEmails(svc))
+
+		walletPurchaseSvc, err := walletpurchase.NewService(rentalSvc, walletSvc, fulfillmentSvc)
+		if err != nil {
+			return err
+		}
+		walletPurchaseSvc.EnableReceipts(mailQueue, payment.NewAuthUserEmails(svc))
+		walletPurchaseHandler = walletpurchase.NewHandler(walletPurchaseSvc)
 
 		messagingSvc, err := messaging.NewService(messaging.NewRepository(pool), telephonyResolver)
 		if err != nil {
@@ -163,7 +228,8 @@ func run(log *slog.Logger) error {
 		Addr: ":" + cfg.Port,
 		Handler: server.New(server.Deps{
 			Log: log, DB: pool, Auth: authHandler, Tokens: tokens, AuthService: svc,
-			Rental: rentalHandler, Payment: paymentHandler, ProviderConfig: providerConfigHandler, Messaging: messagingHandler,
+			Rental: rentalHandler, Payment: paymentHandler, ProviderConfig: providerConfigHandler, Messaging: messagingHandler, Wallet: walletHandler,
+			WalletPurchase: walletPurchaseHandler, Renewal: renewalHandler,
 			Limiters: limiters, AllowedOrigins: cfg.AllowedOrigins, TrustedProxies: cfg.TrustedProxies,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

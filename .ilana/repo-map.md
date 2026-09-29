@@ -1,9 +1,10 @@
 # Repository map
 
-- branch: `main` at `0bc294f` tracking `origin/main` (ahead 0, behind 0)
-- commits: 11
+- branch: `main` at `b4ef47d` tracking `origin/main` (ahead 0, behind 0)
+- commits: 12
 
 ## Recent commits
+- b4ef47d adding more providers
 - 0bc294f feat(payemen): add the payment gateway using paystack
 - a754975 Update README.md
 - e29a62b feat(roles): add the admin and the users roles
@@ -11,38 +12,42 @@
 - d689386 feat(rental): add provider domain schema and lifecycle constraints
 - 3b11566 feat(provider): add provider abstraction and Twilio adapter
 - 8b08eac fix: swagger docs
-- 95043ec add: openapi
 
-## Uncommitted work (11 paths)
-- `.ilana/` 11 (??)
+## Uncommitted work (16 paths)
+- `.ilana/` 5 (M)
+- `cmd/` 1 (M)
+- `docs/` 3 (??,M)
+- `internal/` 6 (??,M)
+- `migrations/` 1 (??)
 
 ## Languages (tracked files)
-Go 91, SQL 9
+Go 100, SQL 10
 
 ## Entry points
 `Dockerfile`, `cmd/api/main.go`, `docker-compose.yml`
 
 ## Packages and import edges
-- `cmd/api` (1 files) -> internal/auth, internal/config, internal/database, internal/fulfillment, internal/mailer, internal/payment, internal/providerconfig, internal/providercrypto, internal/rental, internal/server, internal/user, migrations
+- `cmd/api` (1 files) -> internal/auth, internal/config, internal/database, internal/fulfillment, internal/mailer, internal/messaging, internal/payment, internal/providerconfig, internal/providercrypto, internal/rental, internal/server, internal/user, internal/wallet, migrations
 - `internal/auth` (15 files) -> internal/httpx, internal/mailer, internal/ratelimit, internal/user
 - `internal/config` (1 files)
 - `internal/database` (2 files)
 - `internal/fulfillment` (2 files) -> internal/providerconfig, internal/rental, internal/telephony
 - `internal/httpx` (4 files)
 - `internal/mailer` (4 files)
+- `internal/messaging` (3 files) -> internal/auth, internal/httpx, internal/telephony
 - `internal/payment` (6 files) -> internal/auth, internal/fulfillment, internal/httpx, internal/paystack, internal/providerconfig, internal/rental
 - `internal/paystack` (1 files)
 - `internal/providerconfig` (3 files) -> internal/httpx
 - `internal/providercrypto` (1 files)
 - `internal/ratelimit` (1 files) -> internal/httpx
 - `internal/rental` (3 files) -> internal/auth, internal/httpx
-- `internal/server` (1 files) -> docs, internal/auth, internal/httpx, internal/payment, internal/providerconfig, internal/ratelimit, internal/rental, internal/user
-- `internal/telephony` (3 files)
+- `internal/server` (1 files) -> docs, internal/auth, internal/httpx, internal/messaging, internal/payment, internal/providerconfig, internal/ratelimit, internal/rental, internal/user, internal/wallet
+- `internal/telephony` (6 files)
 - `internal/user` (2 files)
 
 ## Data ownership
-- migrations: 9, latest `0009_order_pending_fulfillment.sql`
-- tables: email_verification_tokens, inbound_messages, orders, password_reset_tokens, payments, provider_configs, provider_numbers, provider_webhook_events, refresh_sessions, rental_plans, rentals, users
+- migrations: 10, latest `0010_create_messages.sql`
+- tables: email_verification_tokens, inbound_messages, message_events, messages, orders, password_reset_tokens, payments, provider_configs, provider_numbers, provider_webhook_events, refresh_sessions, rental_plans, rentals, users
 
 ## Environment variables read by code
 CI, TEST_DATABASE_URL

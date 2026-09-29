@@ -11,146 +11,90 @@
     "go.mod",
     "go.sum"
   ],
-  "head": "0bc294fc2f052f2d98c251ed6f47f75ea171495b",
+  "head": "b4ef47d74b063b44ceaae327fd0202d1a159ddbb",
   "preexisting": {
-    ".ilana/changes.md": {
-      "hash": "14f9b2fc68c5ddb0f23644d8eb0b8572538179cc",
-      "status": "??"
-    },
     ".ilana/decisions.md": {
-      "hash": "8130be6d8c39b79438a334f5a5c8975bbdb5631a",
-      "status": "??"
-    },
-    ".ilana/defects.md": {
-      "hash": "f2d7163ee7a5176f7675be7158bbbfe1c260b64f",
-      "status": "??"
-    },
-    ".ilana/ethics.md": {
-      "hash": "45caae69a2a14fe9ce084ef5b1f4babde35b3d9e",
-      "status": "??"
+      "hash": "384f4005adb41596dd03786c2deeed902eb45c9a",
+      "status": "M"
     },
     ".ilana/evidence.jsonl": {
-      "hash": "ab65622bfaf411808c216fffd56e5b52f5bb1226",
-      "status": "??"
+      "hash": "eefc230091d8109672f51ee90d75a133353654f4",
+      "status": "M"
     },
     ".ilana/handoff.json": {
-      "hash": "d2411f0a9a4258ccd38739720aed1efde9c53f83",
-      "status": "??"
-    },
-    ".ilana/ledger.md": {
-      "hash": "0163cc94bf5e188a598a36bed27cfc6fecde0357",
-      "status": "??"
-    },
-    ".ilana/metrics.csv": {
-      "hash": "41ecbc5473f19a34b657d0d085d0ffd5bfedd13b",
-      "status": "??"
+      "hash": "0c417d24aa84f5a798d975bebceb47b915137eef",
+      "status": "M"
     },
     ".ilana/milestone-state.md": {
-      "hash": "67c996cfd09638dbff91bea24ce09d5d64a9304f",
-      "status": "??"
-    },
-    ".ilana/policy.json": {
-      "hash": "fbb117542d14519f2d340e0ba0abae235627abb8",
-      "status": "??"
-    },
-    ".ilana/privacy-checklist.md": {
-      "hash": "535683c3b3e26148f28ccf24e3bf7b21ae389dc4",
-      "status": "??"
+      "hash": "7e5663e3f24d79d285e699d17368593a00c6e4dd",
+      "status": "M"
     },
     ".ilana/repo-map.md": {
-      "hash": "e0abcee2b5bff3aa1d020fa08a527c5ca9bcf4aa",
-      "status": "??"
-    },
-    ".ilana/requirements.md": {
-      "hash": "03e9efbcaf0fda6e4ee6ea293fb0470f5630a565",
-      "status": "??"
-    },
-    ".ilana/risks.md": {
-      "hash": "90b68b6b3993d25cbdcc9a354a9ed36cc0c51e03",
-      "status": "??"
-    },
-    ".ilana/state.json": {
-      "hash": "a0cd3b2cd31474716dc390ded9182054b245f0e4",
-      "status": "??"
+      "hash": "cc8b9e4653caf229b9219a119d94e215dc3f9e67",
+      "status": "M"
     },
     ".ilana/traceability.csv": {
-      "hash": "7f7188f3e7fc52243d8d0400bdcda0fe18779030",
-      "status": "??"
-    },
-    "README.md": {
-      "hash": "455432d7445a8cbecc78867c4a1d54af1d0837f8",
+      "hash": "b9292f07aab3b6b93ae890ec0316bfb977ee9dcb",
       "status": "M"
     },
     "cmd/api/main.go": {
-      "hash": "f2832a24a6b2d8b063598b875683c934a7873eb9",
+      "hash": "f6301c644bb040b53a7b87791701f4656f9b044c",
       "status": "M"
     },
     "docs/API.md": {
-      "hash": "3f025dbce956d385bcdf499bd9368fbbbe0f5412",
+      "hash": "fa0a988358b50c6f3b7d2b0cac4b994b86ffe2f1",
       "status": "M"
+    },
+    "docs/BACKEND_MILESTONES.md": {
+      "hash": "b8afef99e7815d8bd2ce12d37ec6eec7ec320cba",
+      "status": "??"
     },
     "docs/openapi.yaml": {
-      "hash": "70a5c1d38cf3075ab8108490c71dd2e59f474756",
+      "hash": "f4b623c78e16925c6da1e26d42941d78a5825d39",
       "status": "M"
     },
-    "internal/fulfillment/provider_resolver.go": {
-      "hash": "5148321944c9699f6ddbde4fd4abd28f6dad3fb6",
-      "status": "M"
-    },
-    "internal/fulfillment/service.go": {
-      "hash": "7e2c641aa7764b30b6773a3d55f7b72eee875661",
-      "status": "M"
-    },
-    "internal/fulfillment/service_test.go": {
-      "hash": "950c9e3b65f53a2dd672c3e98f4541169baeaed2",
-      "status": "M"
-    },
-    "internal/messaging/handler.go": {
-      "hash": "e7b03af93fba24b7cc11fb5159e051ea0d5f4a63",
-      "status": "??"
-    },
-    "internal/messaging/repository.go": {
-      "hash": "0b1438091c49d2fc52360cf0bbc99faf49ce8821",
-      "status": "??"
-    },
-    "internal/messaging/service.go": {
-      "hash": "57ea395cec776f21655d431227651d10eb6da818",
-      "status": "??"
-    },
-    "internal/messaging/service_test.go": {
-      "hash": "8fb9b3c4e9728a58d57af05b4e2d188bb5ef5ddf",
-      "status": "??"
-    },
-    "internal/providerconfig/service.go": {
-      "hash": "42b5e102aa8ded926dd1e62303baaffd9e9d8a68",
+    "internal/payment/service.go": {
+      "hash": "c99094829c9a74adbe1810a138cce49e4c438c98",
       "status": "M"
     },
     "internal/server/server.go": {
-      "hash": "8ae73520846031dd39994ebef0dbec5e507464e1",
+      "hash": "f0f6dc6ef729b37772f3acca020aadf5b82f7e78",
       "status": "M"
     },
-    "internal/telephony/http_error.go": {
-      "hash": "df4ab927b22bd35dfc2fa43e679a2e3370917456",
+    "internal/wallet/funding.go": {
+      "hash": "557df4c630e510c65f98f97e1ee82110db673b8f",
       "status": "??"
     },
-    "internal/telephony/telnyx.go": {
-      "hash": "eda5db02a2d3ecd64f16aad15c16dd1e4d6217e4",
+    "internal/wallet/funding_test.go": {
+      "hash": "daa072c024e0f780a54ed5ee34ab61e679dc3737",
       "status": "??"
     },
-    "internal/telephony/telnyx_test.go": {
-      "hash": "55cbd3accc7140d63313d351ce3d2874a792f6b0",
+    "internal/wallet/handler.go": {
+      "hash": "f96dc4baccdf69eda3bbc9eb17669cc750e94f45",
       "status": "??"
     },
-    "internal/telephony/vonage.go": {
-      "hash": "178ca947988d6490c31412f56ec9bf8da7600891",
+    "internal/wallet/repository.go": {
+      "hash": "7b7e23afd68e7a9aa3e5f875201844ed52247cc5",
       "status": "??"
     },
-    "internal/telephony/vonage_test.go": {
-      "hash": "7149a09b6042fabb7bad82f9d80a47549b800b25",
+    "internal/wallet/repository_integration_test.go": {
+      "hash": "e073875fe9cd15c1d56ebd4a98ce495479da33c6",
       "status": "??"
     },
-    "migrations/0010_create_messages.sql": {
-      "hash": "2f552f050cf3faf09a31bbfde2be748dc1d0ee15",
+    "internal/wallet/service.go": {
+      "hash": "b3755f7c76370ec883bef5cda3c79d7e69b05df0",
+      "status": "??"
+    },
+    "internal/wallet/service_test.go": {
+      "hash": "1cdb35c456e2187328c8d3acf779bbec069c4a6f",
+      "status": "??"
+    },
+    "migrations/0011_create_wallets.sql": {
+      "hash": "5f714b3798e9147af39e0f5bb28b3eb167f5cede",
+      "status": "??"
+    },
+    "migrations/0012_wallet_funding.sql": {
+      "hash": "1b3d662027ef514bd714245182b29a2469853dbe",
       "status": "??"
     }
   }

@@ -1,4 +1,4 @@
-# Migo API — v0.4
+# Verifyflow API — v0.4
 
 Interactive Swagger UI: `/docs/` on the running API (for example, `http://localhost:8080/docs/`). The same path works after deployment. The machine-readable OpenAPI 3.0 specification is available at `/docs/openapi.yaml` and in [openapi.yaml](openapi.yaml).
 
@@ -18,6 +18,17 @@ Telephony provider configuration keys are `twilio`, `vonage`, and `telnyx`. Thei
 {"api_key":"...","api_secret":"...","signature_secret":"...","default_country":"NG"}
 {"api_key":"...","public_key":"...","messaging_profile_id":"..."}
 ```
+
+## Wallet
+
+- `GET /api/v1/wallet?currency=NGN` returns or creates the authenticated customer's currency wallet.
+- `GET /api/v1/transactions?currency=NGN&limit=50` returns immutable ledger entries.
+- `POST /api/v1/admin/wallet-adjustments` creates an audited credit or debit. It requires an admin bearer token, an `Idempotency-Key` header (or `idempotency_key` body field), a positive minor-unit amount, and a mandatory reason.
+- `POST /api/v1/wallet/funding` initializes a Paystack checkout using the authenticated user's email. It requires `Idempotency-Key` and an amount in minor units.
+- `POST /api/v1/wallet/funding/{id}/verify` verifies the attempt directly with Paystack and credits the wallet only when amount and currency match.
+
+Wallet balances cannot become negative. Ledger rows cannot be updated or deleted; corrections must use compensating entries.
+Paystack remains optional until an enabled encrypted `paystack` provider configuration containing `{"secret_key":"..."}` is created. Without it, funding returns `503 payment_provider_unavailable`.
 
 Base URL (local): `http://localhost:8080`
 All bodies are JSON (`Content-Type: application/json`). Max request body: 16 KiB.

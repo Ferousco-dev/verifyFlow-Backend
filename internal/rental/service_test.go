@@ -19,6 +19,15 @@ type fakeStore struct {
 	searchErr    error
 	plans        []Plan
 	plansErr     error
+	plan         Plan
+	planErr      error
+
+	dueRenewals     []DueRenewal
+	dueRenewalsErr  error
+	renewOK         bool
+	renewErr        error
+	expireActiveOK  bool
+	expireActiveErr error
 
 	snapshot    FulfillmentSnapshot
 	snapshotErr error
@@ -46,6 +55,30 @@ func (f *fakeStore) SearchNumbers(context.Context, NumberFilter) (NumbersPage, e
 
 func (f *fakeStore) ListPlans(context.Context) ([]Plan, error) {
 	return f.plans, f.plansErr
+}
+
+func (f *fakeStore) AdminListPlans(context.Context) ([]Plan, error) {
+	return f.plans, f.plansErr
+}
+
+func (f *fakeStore) CreatePlan(context.Context, PlanInput) (Plan, error) {
+	return f.plan, f.planErr
+}
+
+func (f *fakeStore) UpdatePlanPricing(context.Context, string, int64, int64) (Plan, error) {
+	return f.plan, f.planErr
+}
+
+func (f *fakeStore) ListDueRenewals(context.Context, time.Time, int) ([]DueRenewal, error) {
+	return f.dueRenewals, f.dueRenewalsErr
+}
+
+func (f *fakeStore) RenewRental(context.Context, string, int32, time.Time, time.Time) (bool, error) {
+	return f.renewOK, f.renewErr
+}
+
+func (f *fakeStore) ExpireActiveRental(context.Context, string, int32, time.Time) (bool, error) {
+	return f.expireActiveOK, f.expireActiveErr
 }
 
 func (f *fakeStore) Reserve(_ context.Context, input ReserveInput) (Reservation, error) {

@@ -3,6 +3,7 @@ package mailer
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -47,12 +48,25 @@ func (r *Resend) Send(ctx context.Context, m Message) error {
 		return errors.New("mailer: Resend API key is required")
 	}
 
+	type resendAttachment struct {
+		Filename    string `json:"filename"`
+		Content     string `json:"content"` // base64
+		ContentType string `json:"content_type,omitempty"`
+	}
+	attachments := make([]resendAttachment, 0, len(m.Attachments))
+	for _, a := range m.Attachments {
+		attachments = append(attachments, resendAttachment{
+			Filename: a.Filename, Content: base64.StdEncoding.EncodeToString(a.Content), ContentType: a.ContentType,
+		})
+	}
 	body, err := json.Marshal(struct {
-		From    string   `json:"from"`
-		To      []string `json:"to"`
-		Subject string   `json:"subject"`
-		Text    string   `json:"text"`
-	}{From: r.from, To: []string{m.To}, Subject: m.Subject, Text: m.Body})
+		From        string             `json:"from"`
+		To          []string           `json:"to"`
+		Subject     string             `json:"subject"`
+		Text        string             `json:"text"`
+		HTML        string             `json:"html,omitempty"`
+		Attachments []resendAttachment `json:"attachments,omitempty"`
+	}{From: r.from, To: []string{m.To}, Subject: m.Subject, Text: m.Body, HTML: m.HTML, Attachments: attachments})
 	if err != nil {
 		return fmt.Errorf("mailer: encode Resend email: %w", err)
 	}

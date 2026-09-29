@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -73,6 +74,59 @@ func (r *Repository) ListPlans(ctx context.Context) ([]Plan, error) {
 	return plans, rows.Err()
 }
 
+const adminPlanColumns = `id::text, plan_code, name, duration_seconds, provider_cost_minor_units, price_minor_units, currency, is_active`
+
+func scanPlan(row pgx.Row) (Plan, error) {
+	var p Plan
+	err := row.Scan(&p.ID, &p.Code, &p.Name, &p.DurationSeconds, &p.ProviderCostMinorUnits, &p.PriceMinorUnits, &p.Currency, &p.IsActive)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Plan{}, ErrNotFound
+	}
+	return p, err
+}
+
+// AdminListPlans returns every plan (active or not) with its provider cost,
+// for the admin pricing screen only.
+func (r *Repository) AdminListPlans(ctx context.Context) ([]Plan, error) {
+	rows, err := r.pool.Query(ctx, `SELECT `+adminPlanColumns+` FROM rental_plans ORDER BY plan_code`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var plans []Plan
+	for rows.Next() {
+		p, err := scanPlan(rows)
+		if err != nil {
+			return nil, err
+		}
+		plans = append(plans, p)
+	}
+	return plans, rows.Err()
+}
+
+func (r *Repository) CreatePlan(ctx context.Context, in PlanInput) (Plan, error) {
+	p, err := scanPlan(r.pool.QueryRow(ctx,
+		`INSERT INTO rental_plans (plan_code, name, duration_seconds, provider_cost_minor_units, price_minor_units, currency)
+		 VALUES ($1, $2, $3, $4, $5, $6) RETURNING `+adminPlanColumns,
+		in.Code, in.Name, in.DurationSeconds, in.ProviderCostMinorUnits, in.PriceMinorUnits, in.Currency))
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return Plan{}, ErrDuplicatePlan
+		}
+		return Plan{}, err
+	}
+	return p, nil
+}
+
+func (r *Repository) UpdatePlanPricing(ctx context.Context, planID string, providerCostMinorUnits, priceMinorUnits int64) (Plan, error) {
+	return scanPlan(r.pool.QueryRow(ctx,
+		`UPDATE rental_plans SET provider_cost_minor_units = $2, price_minor_units = $3, updated_at = now()
+		  WHERE id = $1::uuid RETURNING `+adminPlanColumns,
+		planID, providerCostMinorUnits, priceMinorUnits))
+}
+
 func (r *Repository) Reserve(ctx context.Context, input ReserveInput) (Reservation, error) {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
@@ -124,17 +178,18 @@ func (r *Repository) Reserve(ctx context.Context, input ReserveInput) (Reservati
 	}
 
 	var plan struct {
-		ID              string
-		Code            string
-		Name            string
-		DurationSeconds int32
-		PriceMinorUnits int64
-		Currency        string
+		ID                     string
+		Code                   string
+		Name                   string
+		DurationSeconds        int32
+		ProviderCostMinorUnits int64
+		PriceMinorUnits        int64
+		Currency               string
 	}
 	err = tx.QueryRow(ctx,
-		`SELECT id::text, plan_code, name, duration_seconds, price_minor_units, currency
+		`SELECT id::text, plan_code, name, duration_seconds, provider_cost_minor_units, price_minor_units, currency
 		   FROM rental_plans WHERE id = $1::uuid AND is_active FOR SHARE`, input.RentalPlanID,
-	).Scan(&plan.ID, &plan.Code, &plan.Name, &plan.DurationSeconds, &plan.PriceMinorUnits, &plan.Currency)
+	).Scan(&plan.ID, &plan.Code, &plan.Name, &plan.DurationSeconds, &plan.ProviderCostMinorUnits, &plan.PriceMinorUnits, &plan.Currency)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Reservation{}, ErrPlanUnavailable
 	}
@@ -145,9 +200,9 @@ func (r *Repository) Reserve(ctx context.Context, input ReserveInput) (Reservati
 	var orderID string
 	err = tx.QueryRow(ctx,
 		`INSERT INTO orders (user_id, rental_plan_id, plan_code_snapshot, plan_name_snapshot,
-		 duration_seconds_snapshot, price_minor_units_snapshot, currency_snapshot, idempotency_key, order_status)
-		 VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, 'PENDING') RETURNING id::text`,
-		input.UserID, plan.ID, plan.Code, plan.Name, plan.DurationSeconds, plan.PriceMinorUnits, plan.Currency, input.IdempotencyKey,
+		 duration_seconds_snapshot, provider_cost_minor_units_snapshot, price_minor_units_snapshot, currency_snapshot, idempotency_key, order_status)
+		 VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9, 'PENDING') RETURNING id::text`,
+		input.UserID, plan.ID, plan.Code, plan.Name, plan.DurationSeconds, plan.ProviderCostMinorUnits, plan.PriceMinorUnits, plan.Currency, input.IdempotencyKey,
 	).Scan(&orderID)
 	if err != nil {
 		return Reservation{}, err
@@ -176,7 +231,7 @@ func (r *Repository) Reserve(ctx context.Context, input ReserveInput) (Reservati
 
 const orderSelect = `SELECT o.id::text, o.user_id::text, r.id::text, r.provider_number_id::text,
 	o.rental_plan_id::text, o.order_status, o.plan_code_snapshot, o.plan_name_snapshot,
-	o.duration_seconds_snapshot, o.price_minor_units_snapshot, o.currency_snapshot,
+	o.duration_seconds_snapshot, o.provider_cost_minor_units_snapshot, o.price_minor_units_snapshot, o.currency_snapshot,
 	r.reservation_expires_at, o.created_at
 	FROM orders o JOIN rentals r ON r.order_id = o.id `
 
@@ -184,7 +239,7 @@ func scanOrder(row pgx.Row) (Order, error) {
 	var order Order
 	err := row.Scan(&order.ID, &order.UserID, &order.RentalID, &order.ProviderNumberID,
 		&order.RentalPlanID, &order.Status, &order.PlanCode, &order.PlanName,
-		&order.DurationSeconds, &order.PriceMinorUnits, &order.Currency,
+		&order.DurationSeconds, &order.ProviderCostMinorUnits, &order.PriceMinorUnits, &order.Currency,
 		&order.ReservationExpiresAt, &order.CreatedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Order{}, ErrNotFound
@@ -317,6 +372,94 @@ func (r *Repository) ActivateRental(ctx context.Context, orderID, providerNumber
 		return ErrNumberUnavailable
 	}
 	return tx.Commit(ctx)
+}
+
+// ListDueRenewals returns ACTIVE rentals (activated, not ended) whose
+// expires_at has passed, oldest-due first, for the renewal job to attempt
+// re-billing.
+func (r *Repository) ListDueRenewals(ctx context.Context, now time.Time, limit int) ([]DueRenewal, error) {
+	rows, err := r.pool.Query(ctx,
+		`SELECT r.id::text, o.id::text, r.user_id::text, u.email, u.full_name, r.provider_number_id::text, pn.phone_number,
+		        o.plan_code_snapshot, o.duration_seconds_snapshot, o.price_minor_units_snapshot, o.currency_snapshot,
+		        r.renewal_count, r.expires_at
+		   FROM rentals r
+		   JOIN orders o ON o.id = r.order_id
+		   JOIN users u ON u.id = r.user_id
+		   JOIN provider_numbers pn ON pn.id = r.provider_number_id
+		  WHERE r.activated_at IS NOT NULL AND r.ended_at IS NULL AND r.expires_at <= $1
+		  ORDER BY r.expires_at
+		  LIMIT $2`, now, limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var due []DueRenewal
+	for rows.Next() {
+		var d DueRenewal
+		if err := rows.Scan(&d.RentalID, &d.OrderID, &d.UserID, &d.UserEmail, &d.UserFullName, &d.ProviderNumberID, &d.PhoneNumber,
+			&d.PlanCode, &d.DurationSeconds, &d.PriceMinorUnits, &d.Currency,
+			&d.RenewalCount, &d.ExpiresAt); err != nil {
+			return nil, err
+		}
+		due = append(due, d)
+	}
+	return due, rows.Err()
+}
+
+// RenewRental extends rentalID's expires_at by one billing period. The
+// WHERE clause is the concurrency guard: it only takes effect if the rental
+// is still at expectedRenewalCount, still active, and still due, so two
+// overlapping renewal-job runs can't both renew (or one renew while the
+// other expires) the same period.
+func (r *Repository) RenewRental(ctx context.Context, rentalID string, expectedRenewalCount int32, newExpiresAt, now time.Time) (bool, error) {
+	tag, err := r.pool.Exec(ctx,
+		`UPDATE rentals SET expires_at = $4, renewal_count = renewal_count + 1
+		  WHERE id = $1::uuid AND renewal_count = $2 AND activated_at IS NOT NULL AND ended_at IS NULL AND expires_at <= $3`,
+		rentalID, expectedRenewalCount, now, newExpiresAt,
+	)
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() == 1, nil
+}
+
+// ExpireActiveRental ends rentalID and releases its number because a
+// renewal debit failed. Guarded by expectedRenewalCount the same way
+// RenewRental is.
+func (r *Repository) ExpireActiveRental(ctx context.Context, rentalID string, expectedRenewalCount int32, now time.Time) (bool, error) {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+
+	var providerNumberID string
+	tag, err := tx.Exec(ctx,
+		`UPDATE rentals SET ended_at = $4
+		  WHERE id = $1::uuid AND renewal_count = $2 AND activated_at IS NOT NULL AND ended_at IS NULL AND expires_at <= $3`,
+		rentalID, expectedRenewalCount, now, now,
+	)
+	if err != nil {
+		return false, err
+	}
+	if tag.RowsAffected() != 1 {
+		return false, nil
+	}
+	if err := tx.QueryRow(ctx, `SELECT provider_number_id::text FROM rentals WHERE id = $1::uuid`, rentalID).Scan(&providerNumberID); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE provider_numbers SET status = 'EXPIRED', updated_at = $2 WHERE id = $1::uuid AND status = 'ACTIVE'`,
+		providerNumberID, now,
+	); err != nil {
+		return false, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (r *Repository) ExpireReservation(ctx context.Context, rentalID string, now time.Time) (bool, error) {

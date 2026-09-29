@@ -44,7 +44,7 @@ func newFullStack(t *testing.T, paystackBaseURL, twilioBaseURL string) (http.Han
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc.EnableEmailVerification(auth.NewVerifyRepository(pool), &sink{}, "https://app.example.com/verify-email", 24*time.Hour, log)
+	svc.EnableEmailVerification(auth.NewVerifyRepository(pool), &sink{}, "https://app.example.com/verify-email", "https://app.example.com/dashboard", 24*time.Hour, log)
 	h := auth.NewHandler(svc, log)
 
 	rentalSvc, err := rental.NewService(rental.NewRepository(pool), 15*time.Minute)

@@ -7,7 +7,7 @@ REQ-005,Allow an authenticated owner to list their numbers and messages,function
 REQ-006,Allow outbound SMS only from an active SMS-capable number owned by the authenticated user,functional,DES-006,internal/messaging,TC-008;TC-009,implemented
 NFR-001,Provider credentials remain encrypted and absent from API responses and logs,non-functional,DES-007,internal/providerconfig;internal/providercrypto,TC-010,implemented
 NFR-002,Webhook requests are bounded rate limited and idempotent,non-functional,DES-008,internal/messaging;internal/server,TC-006;TC-011,implemented
-REQ-007,Provide immutable wallet ledger deposits refunds and adjustments,functional,DES-009,internal/wallet,,specified
+REQ-007,Provide immutable wallet ledger deposits refunds and adjustments,functional,DES-009,internal/wallet,TC-012;TC-013;TC-014,partial
 REQ-008,Run inventory expiry renewal reconciliation retry and provider health jobs,functional,DES-010,internal/jobs,,specified
 REQ-009,Provide admin views for users numbers orders transactions webhooks audit logs and provider health,functional,DES-011,internal/admin,,specified
 REQ-010,Support account suspension support roles admin MFA and privileged-action audits,functional,DES-012,internal/auth;internal/audit,,specified

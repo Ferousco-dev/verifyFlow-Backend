@@ -14,17 +14,19 @@ import (
 var ErrInvalidVerificationToken = errors.New("invalid or expired verification token")
 
 type verifyConfig struct {
-	store   VerifyStore
-	mailer  mailer.Sender
-	baseURL string // frontend page; the token is appended as #token=...
-	ttl     time.Duration
-	log     *slog.Logger
+	store        VerifyStore
+	mailer       mailer.Sender
+	baseURL      string // frontend page; the token is appended as #token=...
+	dashboardURL string // where the welcome email's "go to dashboard" button points
+	ttl          time.Duration
+	log          *slog.Logger
 }
 
 // EnableEmailVerification turns on verification emails at sign-up and the
-// verify/resend flows.
-func (s *Service) EnableEmailVerification(store VerifyStore, m mailer.Sender, baseURL string, ttl time.Duration, log *slog.Logger) {
-	s.verify = &verifyConfig{store: store, mailer: m, baseURL: baseURL, ttl: ttl, log: log}
+// verify/resend flows, plus a one-time welcome email sent right after a
+// customer's first successful verification.
+func (s *Service) EnableEmailVerification(store VerifyStore, m mailer.Sender, baseURL, dashboardURL string, ttl time.Duration, log *slog.Logger) {
+	s.verify = &verifyConfig{store: store, mailer: m, baseURL: baseURL, dashboardURL: dashboardURL, ttl: ttl, log: log}
 }
 
 func (s *Service) EmailVerificationEnabled() bool { return s.verify != nil }
@@ -63,7 +65,21 @@ func (s *Service) VerifyEmail(ctx context.Context, rawToken string) error {
 	if res.Outcome != VerifyOK {
 		return ErrInvalidVerificationToken
 	}
+	s.sendWelcome(ctx, res.UserID)
 	return nil
+}
+
+// sendWelcome is best-effort: a failure here must never fail verification
+// itself, so errors are logged, not returned.
+func (s *Service) sendWelcome(ctx context.Context, userID string) {
+	u, err := s.users.GetByID(ctx, userID)
+	if err != nil {
+		s.verify.log.Error("could not load user for welcome email", "error", err)
+		return
+	}
+	if err := s.verify.mailer.Send(ctx, mailer.WelcomeEmail(mailer.DefaultBrand, u.Email, u.FullName, s.verify.dashboardURL)); err != nil {
+		s.verify.log.Error("could not queue welcome email", "error", err)
+	}
 }
 
 // ResendVerification sends a new link to the signed-in user. It reports

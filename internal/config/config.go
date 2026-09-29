@@ -30,6 +30,11 @@ type Config struct {
 
 	ResendAPIKey string
 	MailFrom     string
+	// MailBrandName and MailLogoURL brand every transactional email's shared
+	// header. MailLogoURL is optional: until a hosted logo image exists,
+	// emails render a plain circle with the brand's initial instead.
+	MailBrandName string
+	MailLogoURL   string
 	// PasswordResetURL is the frontend page that receives the reset token,
 	// appended as a #token=... fragment (never sent to servers or logs).
 	PasswordResetURL string
@@ -43,6 +48,11 @@ type Config struct {
 	// RentalReservationTTL is how long a number reservation holds before it
 	// is eligible for expiry (freeing the number back to AVAILABLE).
 	RentalReservationTTL time.Duration
+
+	// RenewalInterval is how often the rental auto-renewal pass runs: for
+	// every ACTIVE rental whose billing period has ended, re-bill the
+	// customer's wallet or release the number if that debit fails.
+	RenewalInterval time.Duration
 
 	// ProviderCredentialKeys are the AES-256 keys (32 raw bytes each) used to
 	// encrypt provider_configs.credentials_ciphertext, keyed by version.
@@ -146,6 +156,8 @@ func Load(getenv func(string) string) (Config, error) {
 			cfg.MailFrom = addr.String()
 		}
 	}
+	cfg.MailBrandName = get("MAIL_BRAND_NAME", "Verifyflow")
+	cfg.MailLogoURL = get("MAIL_LOGO_URL", "")
 
 	if cfg.PasswordResetTTL, err = parseDuration(get("PASSWORD_RESET_TTL", "30m"), "PASSWORD_RESET_TTL"); err != nil {
 		errs = append(errs, err)
@@ -173,6 +185,12 @@ func Load(getenv func(string) string) (Config, error) {
 		errs = append(errs, err)
 	} else if cfg.RentalReservationTTL < time.Minute || cfg.RentalReservationTTL > time.Hour {
 		errs = append(errs, errors.New("RENTAL_RESERVATION_TTL must be between 1m and 1h"))
+	}
+
+	if cfg.RenewalInterval, err = parseDuration(get("RENEWAL_INTERVAL", "1h"), "RENEWAL_INTERVAL"); err != nil {
+		errs = append(errs, err)
+	} else if cfg.RenewalInterval < time.Minute || cfg.RenewalInterval > 24*time.Hour {
+		errs = append(errs, errors.New("RENEWAL_INTERVAL must be between 1m and 24h"))
 	}
 	verifyURL := get("EMAIL_VERIFICATION_URL", "")
 	if verifyURL == "" && len(cfg.AllowedOrigins) > 0 {

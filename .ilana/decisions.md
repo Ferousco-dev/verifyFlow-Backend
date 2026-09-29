@@ -15,3 +15,7 @@ This change is backend-only. Frontend implementation and production deployment r
 ## DEC-004 - Message normalization
 
 Provider webhooks are verified by their adapters and written into a common `messages` model. Provider payload bodies are not persisted by the messaging service; only correlation metadata is retained to reduce sensitive-data exposure.
+
+## DEC-005 - Optional Paystack runtime configuration
+
+Wallet funding is implemented without embedding credentials. The existing encrypted provider configuration resolves Paystack only at request time. Until an enabled configuration is supplied, funding endpoints fail closed with a service-unavailable response; tests use a local deterministic HTTP provider double.

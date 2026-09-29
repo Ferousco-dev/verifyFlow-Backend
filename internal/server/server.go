@@ -15,8 +15,11 @@ import (
 	"migo/internal/payment"
 	"migo/internal/providerconfig"
 	"migo/internal/ratelimit"
+	"migo/internal/renewal"
 	"migo/internal/rental"
 	"migo/internal/user"
+	"migo/internal/wallet"
+	"migo/internal/walletpurchase"
 )
 
 // Pinger is satisfied by *pgxpool.Pool.
@@ -81,6 +84,9 @@ type Deps struct {
 	Payment        *payment.Handler
 	ProviderConfig *providerconfig.Handler
 	Messaging      *messaging.Handler
+	Wallet         *wallet.Handler
+	WalletPurchase *walletpurchase.Handler
+	Renewal        *renewal.Handler
 	Limiters       Limiters
 	AllowedOrigins []string
 	TrustedProxies []*net.IPNet
@@ -141,6 +147,18 @@ func New(d Deps) http.Handler {
 			mux.Handle("GET /api/v1/admin/provider-configs", requireAdmin(http.HandlerFunc(d.ProviderConfig.List)))
 			mux.Handle("PATCH /api/v1/admin/provider-configs/{id}", requireAdmin(http.HandlerFunc(d.ProviderConfig.SetEnabled)))
 		}
+		if d.Wallet != nil {
+			mux.Handle("POST /api/v1/admin/wallet-adjustments", requireAdmin(http.HandlerFunc(d.Wallet.Adjust)))
+		}
+		if d.Rental != nil {
+			mux.Handle("GET /api/v1/admin/rental-plans", requireAdmin(http.HandlerFunc(d.Rental.AdminListPlans)))
+			mux.Handle("POST /api/v1/admin/rental-plans", requireAdmin(http.HandlerFunc(d.Rental.CreatePlan)))
+			mux.Handle("PATCH /api/v1/admin/rental-plans/{id}/pricing", requireAdmin(http.HandlerFunc(d.Rental.UpdatePlanPricing)))
+			mux.Handle("GET /api/v1/admin/orders/{id}", requireAdmin(http.HandlerFunc(d.Rental.AdminGetOrder)))
+		}
+		if d.Renewal != nil {
+			mux.Handle("POST /api/v1/admin/renewals/run", requireAdmin(http.HandlerFunc(d.Renewal.Run)))
+		}
 	}
 
 	if d.Rental != nil {
@@ -154,6 +172,10 @@ func New(d Deps) http.Handler {
 		mux.Handle("GET /api/v1/rental-plans", requireVerified(http.HandlerFunc(d.Rental.ListPlans)))
 		mux.Handle("POST /api/v1/rentals", requireVerified(http.HandlerFunc(d.Rental.Reserve)))
 		mux.Handle("GET /api/v1/orders/{id}", requireVerified(http.HandlerFunc(d.Rental.GetOrder)))
+
+		if d.WalletPurchase != nil {
+			mux.Handle("POST /api/v1/numbers/purchase", requireVerified(http.HandlerFunc(d.WalletPurchase.Purchase)))
+		}
 
 		if d.Payment != nil {
 			mux.Handle("POST /api/v1/orders/{id}/payment", requireVerified(http.HandlerFunc(d.Payment.Initialize)))
@@ -172,6 +194,12 @@ func New(d Deps) http.Handler {
 		mux.Handle("GET /api/v1/messages", requireAuth(http.HandlerFunc(d.Messaging.List)))
 		mux.Handle("POST /api/v1/messages", limit(d.Limiters.Messaging)(requireAuth(http.HandlerFunc(d.Messaging.Send))))
 		mux.Handle("POST /api/v1/webhooks/telephony/{providerConfigID}/inbound", limit(d.Limiters.Webhook)(http.HandlerFunc(d.Messaging.Inbound)))
+	}
+	if d.Wallet != nil {
+		mux.Handle("GET /api/v1/wallet", requireAuth(http.HandlerFunc(d.Wallet.Balance)))
+		mux.Handle("GET /api/v1/transactions", requireAuth(http.HandlerFunc(d.Wallet.Transactions)))
+		mux.Handle("POST /api/v1/wallet/funding", requireAuth(http.HandlerFunc(d.Wallet.InitializeFunding)))
+		mux.Handle("POST /api/v1/wallet/funding/{id}/verify", requireAuth(http.HandlerFunc(d.Wallet.VerifyFunding)))
 	}
 
 	// Outermost first: logging sees everything; CORS wraps the router so

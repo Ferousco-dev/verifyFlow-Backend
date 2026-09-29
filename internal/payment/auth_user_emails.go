@@ -21,3 +21,11 @@ func (a *AuthUserEmails) Email(ctx context.Context, userID string) (string, erro
 	}
 	return u.Email, nil
 }
+
+func (a *AuthUserEmails) FullName(ctx context.Context, userID string) (string, error) {
+	u, err := a.svc.Me(ctx, userID)
+	if err != nil {
+		return "", err
+	}
+	return u.FullName, nil
+}

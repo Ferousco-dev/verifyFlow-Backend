@@ -22,6 +22,7 @@ tags:
   - name: Account
   - name: Rentals
   - name: Messaging
+  - name: Wallet
   - name: Webhooks
   - name: Admin
 paths:
@@ -939,6 +940,82 @@ paths:
         '400': { description: Malformed provider event. }
         '401': { description: Invalid provider signature. }
         '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/v1/wallet:
+    get:
+      tags: [Wallet]
+      summary: Get the authenticated customer's wallet balance
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: currency
+          schema: { type: string, default: NGN, pattern: '^[A-Z]{3}$' }
+      responses:
+        '200': { description: Wallet balance. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/transactions:
+    get:
+      tags: [Wallet]
+      summary: List the authenticated customer's immutable wallet ledger
+      security:
+        - bearerAuth: []
+      responses:
+        '200': { description: Wallet transactions. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/v1/admin/wallet-adjustments:
+    post:
+      tags: [Admin, Wallet]
+      summary: Apply an audited wallet credit or debit
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string }
+      responses:
+        '201': { description: Adjustment posted. }
+        '400': { $ref: '#/components/responses/InvalidJSON' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: Insufficient funds or duplicate idempotency key. }
+
+  /api/v1/wallet/funding:
+    post:
+      tags: [Wallet]
+      summary: Initialize a Paystack wallet-funding checkout
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          schema: { type: string, maxLength: 200 }
+      responses:
+        '201': { description: Funding checkout initialized. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '503': { description: Paystack is not configured. }
+
+  /api/v1/wallet/funding/{id}/verify:
+    post:
+      tags: [Wallet]
+      summary: Verify a wallet-funding attempt server-to-server
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '200': { description: Current verified funding state. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { description: Funding attempt not found. }
+        '409': { description: Verified amount or currency mismatch. }
+        '503': { description: Paystack is not configured. }
 
 components:
   securitySchemes:

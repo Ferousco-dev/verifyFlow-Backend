@@ -7,10 +7,21 @@ import (
 	"log/slog"
 )
 
+// Attachment is a file sent alongside an email (e.g. a PDF receipt).
+// Content is raw bytes; senders that support attachments (Resend) base64
+// them on the wire.
+type Attachment struct {
+	Filename    string
+	ContentType string
+	Content     []byte
+}
+
 type Message struct {
-	To      string
-	Subject string
-	Body    string // plain text
+	To          string
+	Subject     string
+	Body        string // plain text; always sent, even alongside HTML, as a fallback
+	HTML        string // optional; rendered branded email, see package template.go
+	Attachments []Attachment
 }
 
 type Sender interface {
@@ -23,6 +34,6 @@ type Sender interface {
 type Log struct{ Logger *slog.Logger }
 
 func (l Log) Send(_ context.Context, m Message) error {
-	l.Logger.Info("email (development log mailer, not sent)", "to", m.To, "subject", m.Subject, "body", m.Body)
+	l.Logger.Info("email (development log mailer, not sent)", "to", m.To, "subject", m.Subject, "body", m.Body, "has_html", m.HTML != "", "attachments", len(m.Attachments))
 	return nil
 }

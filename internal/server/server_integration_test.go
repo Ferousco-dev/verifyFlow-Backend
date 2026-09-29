@@ -73,7 +73,7 @@ func newStackWithFeatures(t *testing.T, accountFeatures bool, trusted ...string)
 	mail := &sink{}
 	svc.EnablePasswordReset(auth.NewResetRepository(pool), mail, "https://app.example.com/reset-password", 30*time.Minute, log)
 	if accountFeatures {
-		svc.EnableEmailVerification(auth.NewVerifyRepository(pool), mail, "https://app.example.com/verify-email", 24*time.Hour, log)
+		svc.EnableEmailVerification(auth.NewVerifyRepository(pool), mail, "https://app.example.com/verify-email", "https://app.example.com/dashboard", 24*time.Hour, log)
 		svc.EnableChangePassword(auth.NewCredentialRepository(pool), mail, log)
 	}
 	h := auth.NewHandler(svc, log)
@@ -408,9 +408,14 @@ func TestEmailVerificationEndToEnd(t *testing.T) {
 		t.Fatalf("/me should reflect persisted verification: %d %s", me.Code, me.Body)
 	}
 
+	// Verification itself sent a third email: the one-time welcome message.
+	if mail.count() != 3 {
+		t.Fatalf("expected a welcome email after verification; emails=%d", mail.count())
+	}
+
 	resend = call(h, req{"POST", "/api/v1/auth/resend-verification", `{}`, ip,
 		map[string]string{"Authorization": "Bearer " + access}})
-	if resend.Code != 200 || mail.count() != 2 {
+	if resend.Code != 200 || mail.count() != 3 {
 		t.Fatalf("verified account should not receive another email: %d %s; emails=%d", resend.Code, resend.Body, mail.count())
 	}
 }

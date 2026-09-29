@@ -77,6 +77,10 @@ type Resolver interface {
 	Resolve(ctx context.Context) (*paystack.Client, string, error)
 }
 
+type WalletFunder interface {
+	HandlePaystackReference(context.Context, *paystack.Client, string, string) (bool, error)
+}
+
 type Store interface {
 	CreateAttempt(ctx context.Context, orderID, providerConfigID string, amountMinorUnits int64, currency string) (Attempt, error)
 	SetReference(ctx context.Context, id, reference, status string) error
@@ -89,13 +93,16 @@ type Store interface {
 }
 
 type Service struct {
-	store       Store
-	orders      Orders
-	emails      UserEmails
-	resolver    Resolver
-	fulfiller   Fulfiller
-	callbackURL string
+	store        Store
+	orders       Orders
+	emails       UserEmails
+	resolver     Resolver
+	fulfiller    Fulfiller
+	callbackURL  string
+	walletFunder WalletFunder
 }
+
+func (s *Service) EnableWalletFunding(funder WalletFunder) { s.walletFunder = funder }
 
 func NewService(store Store, orders Orders, emails UserEmails, resolver Resolver, fulfiller Fulfiller, callbackURL string) (*Service, error) {
 	if store == nil || orders == nil || emails == nil || resolver == nil || fulfiller == nil {
@@ -264,6 +271,11 @@ func (s *Service) HandleWebhookEvent(ctx context.Context, body []byte, signature
 	attempt, err := s.store.GetByReference(ctx, providerConfigID, event.Data.Reference)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) {
+			if s.walletFunder != nil {
+				if _, walletErr := s.walletFunder.HandlePaystackReference(ctx, client, providerConfigID, event.Data.Reference); walletErr != nil {
+					return walletErr
+				}
+			}
 			return s.store.MarkWebhookProcessed(ctx, providerConfigID, idempotencyKey)
 		}
 		return err

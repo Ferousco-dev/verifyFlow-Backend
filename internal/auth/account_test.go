@@ -30,7 +30,7 @@ func newAcctEnv(t *testing.T) *acctEnv {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	verifies := &fakeVerifies{users: e.users}
 	creds := &fakeCreds{users: e.users, sessions: e.sessions, resets: e.resets}
-	e.svc.EnableEmailVerification(verifies, e.mail, verifyBase, 24*time.Hour, log)
+	e.svc.EnableEmailVerification(verifies, e.mail, verifyBase, "https://app.example.com/dashboard", 24*time.Hour, log)
 	e.svc.EnableChangePassword(creds, e.mail, log)
 	return &acctEnv{resetEnv: e, verifies: verifies, creds: creds}
 }
