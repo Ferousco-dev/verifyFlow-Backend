@@ -1,0 +1,29 @@
+{
+  "ilana_version": "1.1.0",
+  "project": "Verifyflow-backend",
+  "mode": "MAINTAIN",
+  "phase": null,
+  "gate": "G0",
+  "agent": "conductor",
+  "process_style": "hybrid",
+  "rigour": 4,
+  "ceremony": "standard",
+  "open": [],
+  "overrides": [],
+  "counters": {
+    "REQ": 0,
+    "NFR": 0,
+    "DOM": 0,
+    "DES": 0,
+    "UI": 0,
+    "TC": 0,
+    "DEF": 0,
+    "CR": 0,
+    "RSK": 0,
+    "DEC": 0,
+    "MET": 0,
+    "ETH": 0
+  },
+  "attempts": {},
+  "created": "2026-09-29"
+}

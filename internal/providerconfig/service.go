@@ -94,6 +94,13 @@ func (s *Service) List(ctx context.Context, kind string) ([]Config, error) {
 	return s.store.List(ctx, kind)
 }
 
+func (s *Service) Get(ctx context.Context, id string) (Config, error) {
+	if strings.TrimSpace(id) == "" {
+		return Config{}, ErrInvalidRequest
+	}
+	return s.store.Get(ctx, id)
+}
+
 func (s *Service) SetEnabled(ctx context.Context, id string, enabled bool) (Config, error) {
 	if strings.TrimSpace(id) == "" {
 		return Config{}, ErrInvalidRequest

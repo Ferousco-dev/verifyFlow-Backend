@@ -10,9 +10,7 @@ import (
 	"migo/internal/telephony"
 )
 
-const twilioProviderKey = "twilio"
-
-// ProviderConfigResolver resolves the currently enabled Twilio
+// ProviderConfigResolver resolves an enabled telephony
 // provider_configs row into a live client, decrypting its credentials on
 // every call so admin key rotation and enable/disable take effect
 // immediately without a restart.
@@ -33,19 +31,23 @@ func (r *ProviderConfigResolver) SetBaseURL(baseURL string, httpClient *http.Cli
 	r.httpClient = httpClient
 }
 
-func (r *ProviderConfigResolver) Resolve(ctx context.Context) (telephony.Provider, error) {
-	configs, err := r.svc.List(ctx, providerconfig.KindTelephony)
+func (r *ProviderConfigResolver) Resolve(ctx context.Context, providerConfigID string) (telephony.Provider, error) {
+	if providerConfigID == "" {
+		return nil, ErrProviderConfigMissing
+	}
+	cfg, err := r.svc.Get(ctx, providerConfigID)
 	if err != nil {
 		return nil, err
 	}
-	for _, cfg := range configs {
-		if cfg.Key != twilioProviderKey || !cfg.IsEnabled {
-			continue
-		}
-		plaintext, err := r.svc.DecryptedCredentials(ctx, cfg.ID)
-		if err != nil {
-			return nil, err
-		}
+	if cfg.Kind != providerconfig.KindTelephony || !cfg.IsEnabled {
+		return nil, ErrProviderConfigMissing
+	}
+	plaintext, err := r.svc.DecryptedCredentials(ctx, cfg.ID)
+	if err != nil {
+		return nil, err
+	}
+	switch cfg.Key {
+	case "twilio":
 		var creds struct {
 			AccountSID string `json:"account_sid"`
 			AuthToken  string `json:"auth_token"`
@@ -65,6 +67,34 @@ func (r *ProviderConfigResolver) Resolve(ctx context.Context) (telephony.Provide
 			return nil, err
 		}
 		return provider, nil
+	case "vonage":
+		var creds struct {
+			APIKey          string `json:"api_key"`
+			APISecret       string `json:"api_secret"`
+			SignatureSecret string `json:"signature_secret"`
+			DefaultCountry  string `json:"default_country"`
+		}
+		if err := json.Unmarshal(plaintext, &creds); err != nil {
+			return nil, fmt.Errorf("%w: stored Vonage credentials are malformed", ErrProviderConfigMissing)
+		}
+		if r.baseURL != "" {
+			return telephony.NewVonageWithBaseURL(creds.APIKey, creds.APISecret, creds.SignatureSecret, creds.DefaultCountry, r.baseURL, r.httpClient)
+		}
+		return telephony.NewVonage(creds.APIKey, creds.APISecret, creds.SignatureSecret, creds.DefaultCountry)
+	case "telnyx":
+		var creds struct {
+			APIKey             string `json:"api_key"`
+			PublicKey          string `json:"public_key"`
+			MessagingProfileID string `json:"messaging_profile_id"`
+		}
+		if err := json.Unmarshal(plaintext, &creds); err != nil {
+			return nil, fmt.Errorf("%w: stored Telnyx credentials are malformed", ErrProviderConfigMissing)
+		}
+		if r.baseURL != "" {
+			return telephony.NewTelnyxWithBaseURL(creds.APIKey, creds.PublicKey, creds.MessagingProfileID, r.baseURL, r.httpClient)
+		}
+		return telephony.NewTelnyx(creds.APIKey, creds.PublicKey, creds.MessagingProfileID)
+	default:
+		return nil, fmt.Errorf("%w: unsupported telephony provider %q", ErrProviderConfigMissing, cfg.Key)
 	}
-	return nil, ErrProviderConfigMissing
 }

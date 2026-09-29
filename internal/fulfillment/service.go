@@ -34,7 +34,7 @@ type Rentals interface {
 // TelephonyResolver resolves the currently enabled telephony provider into
 // a live client, decrypting its credentials on every call.
 type TelephonyResolver interface {
-	Resolve(ctx context.Context) (telephony.Provider, error)
+	Resolve(ctx context.Context, providerConfigID string) (telephony.Provider, error)
 }
 
 type Service struct {
@@ -63,7 +63,7 @@ func (s *Service) Fulfill(ctx context.Context, orderID string) error {
 		return nil
 	}
 
-	provider, err := s.telephony.Resolve(ctx)
+	provider, err := s.telephony.Resolve(ctx, snapshot.ProviderConfigID)
 	if err != nil {
 		return err
 	}
@@ -78,6 +78,10 @@ func (s *Service) Fulfill(ctx context.Context, orderID string) error {
 			return ErrPendingFulfillment
 		}
 		snapshot, err = s.rentals.GetFulfillmentSnapshot(ctx, orderID)
+		if err != nil {
+			return err
+		}
+		provider, err = s.telephony.Resolve(ctx, snapshot.ProviderConfigID)
 		if err != nil {
 			return err
 		}

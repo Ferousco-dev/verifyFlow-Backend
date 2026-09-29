@@ -11,6 +11,7 @@ import (
 	apidocs "migo/docs"
 	"migo/internal/auth"
 	"migo/internal/httpx"
+	"migo/internal/messaging"
 	"migo/internal/payment"
 	"migo/internal/providerconfig"
 	"migo/internal/ratelimit"
@@ -39,6 +40,8 @@ type Limiters struct {
 	ResendUser         ratelimit.Limiter // per signed-in user (installed on the auth handler)
 	ChangePassword     ratelimit.Limiter // per IP
 	ChangePasswordUser ratelimit.Limiter // per signed-in user (installed on the auth handler)
+	Messaging          ratelimit.Limiter
+	Webhook            ratelimit.Limiter
 }
 
 // DefaultLimiters returns in-memory limiters with production-sane budgets.
@@ -63,6 +66,8 @@ func DefaultLimiters() Limiters {
 		ResendUser:         mem(3, 20*time.Minute),  // ~3/hour per user
 		ChangePassword:     mem(10, time.Minute),    // ~10/min per IP
 		ChangePasswordUser: mem(5, 3*time.Minute),   // ~20/hour per user
+		Messaging:          mem(10, 6*time.Second),
+		Webhook:            mem(100, 100*time.Millisecond),
 	}
 }
 
@@ -75,6 +80,7 @@ type Deps struct {
 	Rental         *rental.Handler
 	Payment        *payment.Handler
 	ProviderConfig *providerconfig.Handler
+	Messaging      *messaging.Handler
 	Limiters       Limiters
 	AllowedOrigins []string
 	TrustedProxies []*net.IPNet
@@ -159,6 +165,13 @@ func New(d Deps) http.Handler {
 		// Unauthenticated by design: trust comes from the Paystack signature
 		// checked inside the handler, not from a bearer token.
 		mux.Handle("POST /api/v1/webhooks/paystack", http.HandlerFunc(d.Payment.Webhook))
+	}
+
+	if d.Messaging != nil {
+		mux.Handle("GET /api/v1/my-numbers", requireAuth(http.HandlerFunc(d.Messaging.MyNumbers)))
+		mux.Handle("GET /api/v1/messages", requireAuth(http.HandlerFunc(d.Messaging.List)))
+		mux.Handle("POST /api/v1/messages", limit(d.Limiters.Messaging)(requireAuth(http.HandlerFunc(d.Messaging.Send))))
+		mux.Handle("POST /api/v1/webhooks/telephony/{providerConfigID}/inbound", limit(d.Limiters.Webhook)(http.HandlerFunc(d.Messaging.Inbound)))
 	}
 
 	// Outermost first: logging sees everything; CORS wraps the router so

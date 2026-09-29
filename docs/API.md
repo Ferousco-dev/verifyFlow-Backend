@@ -2,7 +2,22 @@
 
 Interactive Swagger UI: `/docs/` on the running API (for example, `http://localhost:8080/docs/`). The same path works after deployment. The machine-readable OpenAPI 3.0 specification is available at `/docs/openapi.yaml` and in [openapi.yaml](openapi.yaml).
 
-This reference documents only routes currently registered by the server. Internal telephony/provider support and rental/order/payment persistence exist, but are not yet exposed as HTTP endpoints.
+This reference documents routes registered by the server. Telecom credentials are encrypted at rest and are never returned by provider-configuration endpoints.
+
+## Messaging and numbers
+
+- `GET /api/v1/my-numbers` returns rentals belonging to the authenticated customer.
+- `GET /api/v1/messages?number_id=&cursor=&limit=` returns the authenticated customer's normalized inbox and outbox.
+- `POST /api/v1/messages` sends SMS from an active SMS-capable number owned by the authenticated customer. Body: `{"provider_number_id":"...","to":"+...","body":"..."}`.
+- `POST /api/v1/webhooks/telephony/{providerConfigID}/inbound` accepts signed provider callbacks. Twilio uses `X-Twilio-Signature`; Telnyx uses its timestamp and Ed25519 headers; Vonage SMS callbacks include `sig` in the form body.
+
+Telephony provider configuration keys are `twilio`, `vonage`, and `telnyx`. Their encrypted credential JSON shapes are:
+
+```json
+{"account_sid":"...","auth_token":"..."}
+{"api_key":"...","api_secret":"...","signature_secret":"...","default_country":"NG"}
+{"api_key":"...","public_key":"...","messaging_profile_id":"..."}
+```
 
 Base URL (local): `http://localhost:8080`
 All bodies are JSON (`Content-Type: application/json`). Max request body: 16 KiB.

@@ -1,0 +1,4 @@
+{"cmd": "go vet ./...", "dirty": true, "exit": 1, "head": "0bc294f", "id": "EV-001", "label": "vet", "seconds": 0.3, "tail": ["internal/telephony/telnyx.go:101:16: struct field TotalPages repeats json tag \"page_number\" also at telnyx.go:101"], "ts": "2026-09-29T08:50:27"}
+{"cmd": "go vet ./...", "dirty": true, "exit": 0, "head": "0bc294f", "id": "EV-002", "label": "vet", "seconds": 0.4, "tail": [], "ts": "2026-09-29T08:50:44"}
+{"cmd": "go test -race ./... -count=1", "dirty": true, "exit": 0, "head": "0bc294f", "id": "EV-003", "label": "tests", "seconds": 15.1, "tail": ["?   \tmigo/internal/testutil/dbtest\t[no test files]", "ok  \tmigo/internal/user\t10.218s", "?   \tmigo/migrations\t[no test files]"], "ts": "2026-09-29T08:50:59"}
+{"cmd": "go build ./...", "dirty": true, "exit": 0, "head": "0bc294f", "id": "EV-004", "label": "build", "seconds": 0.9, "tail": [], "ts": "2026-09-29T08:51:00"}

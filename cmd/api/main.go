@@ -17,6 +17,7 @@ import (
 	"migo/internal/database"
 	"migo/internal/fulfillment"
 	"migo/internal/mailer"
+	"migo/internal/messaging"
 	"migo/internal/payment"
 	"migo/internal/providerconfig"
 	"migo/internal/providercrypto"
@@ -103,6 +104,7 @@ func run(log *slog.Logger) error {
 	// disabled too.
 	var providerConfigHandler *providerconfig.Handler
 	var paymentHandler *payment.Handler
+	var messagingHandler *messaging.Handler
 	if len(cfg.ProviderCredentialKeys) > 0 {
 		keyRing, err := providercrypto.NewKeyRing(cfg.ProviderCredentialKeys, cfg.ProviderCredentialKeyVersion)
 		if err != nil {
@@ -114,7 +116,8 @@ func run(log *slog.Logger) error {
 		}
 		providerConfigHandler = providerconfig.NewHandler(providerConfigSvc)
 
-		fulfillmentSvc, err := fulfillment.NewService(rentalSvc, fulfillment.NewProviderConfigResolver(providerConfigSvc))
+		telephonyResolver := fulfillment.NewProviderConfigResolver(providerConfigSvc)
+		fulfillmentSvc, err := fulfillment.NewService(rentalSvc, telephonyResolver)
 		if err != nil {
 			return err
 		}
@@ -131,6 +134,12 @@ func run(log *slog.Logger) error {
 			return err
 		}
 		paymentHandler = payment.NewHandler(paymentSvc)
+
+		messagingSvc, err := messaging.NewService(messaging.NewRepository(pool), telephonyResolver)
+		if err != nil {
+			return err
+		}
+		messagingHandler = messaging.NewHandler(messagingSvc, telephonyResolver)
 	} else {
 		log.Warn("PROVIDER_CREDENTIAL_KEYS not set: provider config management and payment processing are disabled")
 	}
@@ -154,7 +163,7 @@ func run(log *slog.Logger) error {
 		Addr: ":" + cfg.Port,
 		Handler: server.New(server.Deps{
 			Log: log, DB: pool, Auth: authHandler, Tokens: tokens, AuthService: svc,
-			Rental: rentalHandler, Payment: paymentHandler, ProviderConfig: providerConfigHandler,
+			Rental: rentalHandler, Payment: paymentHandler, ProviderConfig: providerConfigHandler, Messaging: messagingHandler,
 			Limiters: limiters, AllowedOrigins: cfg.AllowedOrigins, TrustedProxies: cfg.TrustedProxies,
 		}),
 		ReadHeaderTimeout: 5 * time.Second,

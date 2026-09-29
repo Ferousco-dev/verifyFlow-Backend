@@ -3,19 +3,16 @@ info:
   title: Verifyflow API
   version: 0.5.0
   description: |
-    Public HTTP contract for the currently registered health, authentication, account, rental,
-    and admin routes. All request bodies are JSON. Responses include an `X-Request-ID` header.
+    Public HTTP contract for the registered health, authentication, account, rental, payment,
+    messaging, webhook, and admin routes. All customer request bodies are JSON. Responses include an `X-Request-ID` header.
     Access tokens are short-lived JWTs; refresh tokens are opaque, single-use tokens that rotate
     on refresh.
 
     Rental routes require a verified email address in addition to a valid access token. Admin
     routes require the signed-in user's role to be `admin`; every account starts as `user`.
 
-    The backend also contains internal foundations for provider-neutral telephony, a Twilio
-    adapter (number search/provision/release, webhook configuration, outbound SMS, and signed
-    inbound SMS normalization), and payment integration. Number provisioning after payment,
-    inbound SMS persistence, and the reservation-expiry/quarantine worker are not yet exposed as
-    public HTTP endpoints and therefore do not appear in this OpenAPI contract.
+    Twilio, Vonage, and Telnyx are supported behind a provider-neutral interface. Inbound provider
+    callbacks require their vendor signature and are persisted idempotently.
 servers:
   - url: /
     description: Same origin as this documentation page
@@ -24,6 +21,8 @@ tags:
   - name: Authentication
   - name: Account
   - name: Rentals
+  - name: Messaging
+  - name: Webhooks
   - name: Admin
 paths:
   /health:
@@ -871,6 +870,75 @@ paths:
           $ref: '#/components/responses/InternalError'
         '504':
           $ref: '#/components/responses/Timeout'
+
+  /api/v1/my-numbers:
+    get:
+      tags: [Messaging]
+      summary: List the authenticated customer's rented numbers
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: Customer number list.
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/messages:
+    get:
+      tags: [Messaging]
+      summary: List normalized inbound and outbound messages
+      security:
+        - bearerAuth: []
+      parameters:
+        - in: query
+          name: number_id
+          schema: { type: string, format: uuid }
+        - in: query
+          name: cursor
+          schema: { type: string }
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200': { description: Paginated message list. }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    post:
+      tags: [Messaging]
+      summary: Send an SMS from an owned active number
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [provider_number_id, to, body]
+              properties:
+                provider_number_id: { type: string, format: uuid }
+                to: { type: string, example: '+2348012345678' }
+                body: { type: string, maxLength: 1600 }
+      responses:
+        '201': { description: Message accepted by the configured provider. }
+        '400': { $ref: '#/components/responses/InvalidJSON' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { description: Number is inactive or not SMS capable. }
+        '429': { $ref: '#/components/responses/RateLimited' }
+
+  /api/v1/webhooks/telephony/{providerConfigID}/inbound:
+    post:
+      tags: [Webhooks]
+      summary: Receive a signed inbound SMS callback
+      parameters:
+        - in: path
+          name: providerConfigID
+          required: true
+          schema: { type: string, format: uuid }
+      responses:
+        '204': { description: Event accepted or already processed. }
+        '400': { description: Malformed provider event. }
+        '401': { description: Invalid provider signature. }
+        '429': { $ref: '#/components/responses/RateLimited' }
 
 components:
   securitySchemes:

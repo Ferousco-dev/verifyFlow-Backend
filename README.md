@@ -1,6 +1,6 @@
 # Verifyflow Backend
 
-Verifyflow Backend is a Go API backed by PostgreSQL. It provides account authentication and security features, and contains the internal service foundation for a phone-number rental product. The API can create and secure user accounts today; number rental and payment workflows are not yet exposed as public HTTP endpoints.
+Verifyflow Backend is a Go API backed by PostgreSQL for secure virtual-number rental, payments, and SMS messaging. Telecom providers are selected through encrypted server-side configurations and normalized behind one internal interface.
 
 ## What It Does
 
@@ -8,10 +8,11 @@ Verifyflow Backend is a Go API backed by PostgreSQL. It provides account authent
 - Issues short-lived JWT access tokens and rotating, single-use refresh tokens.
 - Supports sign-out, password reset, email verification, and password changes.
 - Sends transactional email through Resend when configured; without Resend configuration, development logs email content instead of delivering it.
-- Includes internal telephony interfaces and a Twilio adapter for number search, purchase/release, webhook configuration, outbound SMS, and signed inbound SMS parsing.
-- Includes PostgreSQL foundations for number inventory, rental plans, reservations, immutable priced orders, payment attempts, inbound messages, and provider webhook events.
+- Includes Twilio, Vonage, and Telnyx adapters for number search, provisioning/release, outbound SMS, and signed inbound SMS parsing.
+- Exposes rental, Paystack checkout, customer-number, inbox, outbound-message, provider-configuration, and signed webhook endpoints.
+- Includes PostgreSQL foundations for number inventory, rental plans, reservations, immutable priced orders, payment attempts, normalized messages, and provider webhook events.
 
-The rental service creates a pending, server-priced order and reserves a number transactionally. It is not connected to public HTTP routes or a payment gateway yet. There is no wallet or stored user balance.
+The rental service creates a pending, server-priced order and reserves a number transactionally. Paystack confirmation triggers provider-specific fulfillment. There is no wallet or stored user balance yet; checkout currently pays a specific order directly.
 
 ## Technology
 
@@ -123,13 +124,13 @@ internal/config/     Environment configuration and validation
 internal/database/   PostgreSQL connection and migration runner
 internal/httpx/      JSON, errors, middleware, CORS, and client IP handling
 internal/mailer/     Email providers and asynchronous delivery queue
+internal/messaging/  Inbound webhooks, inbox queries, and outbound SMS
 internal/rental/     Rental reservation service and PostgreSQL repository
 internal/server/     HTTP routes and middleware wiring
-internal/telephony/  Provider-neutral telephony contract and Twilio adapter
+internal/telephony/  Provider-neutral Twilio, Vonage, and Telnyx adapters
 internal/user/       User model and repository
 internal/testutil/   Isolated PostgreSQL integration-test setup
 migrations/          Ordered SQL database migrations
 ```
 # PRs are opened
-
 

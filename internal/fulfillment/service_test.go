@@ -68,7 +68,9 @@ type fakeResolver struct {
 	err      error
 }
 
-func (f fakeResolver) Resolve(context.Context) (telephony.Provider, error) { return f.provider, f.err }
+func (f fakeResolver) Resolve(context.Context, string) (telephony.Provider, error) {
+	return f.provider, f.err
+}
 
 // ---- tests ----
 
